@@ -36,7 +36,13 @@
 │  │    server       │    │    web          │            │
 │  │  (WebSocket)    │    │  (Vue 3 + Nginx)│            │
 │  │  Port: 8765     │    │  Port: 8080     │            │
-│  └─────────────────┘    └─────────────────┘            │
+│  └────────┬────────┘    └─────────────────┘            │
+│           │                                             │
+│  ┌────────▼────────┐                                    │
+│  │   PostgreSQL    │                                    │
+│  │   (数据库)       │                                    │
+│  │   Port: 5432    │                                    │
+│  └─────────────────┘                                    │
 │                                                          │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -71,7 +77,9 @@ claw-chats/
 │   └── package.json
 │
 ├── docker-compose.yml      # 一键部署
-└── docs/
+├── init-db/                # 数据库初始化
+│   └── 01-init.sql
+└── docs-proposals/
     └── phase1-mvp.md
 ```
 
@@ -82,7 +90,7 @@ claw-chats/
 ### 技术栈
 - Node.js 20+
 - `ws` (WebSocket)
-- `express` (可选，用于健康检查)
+- `pg` (PostgreSQL 客户端)
 - TypeScript
 
 ### 核心功能
@@ -90,9 +98,15 @@ claw-chats/
 ```typescript
 // server/src/index.ts
 import { WebSocketServer, WebSocket } from 'ws';
+import { Pool } from 'pg';
 
 const PORT = process.env.PORT || 8765;
 const AUTH_TOKENS = new Set(process.env.AUTH_TOKENS?.split(',') || ['demo-token']);
+
+// PostgreSQL 连接池
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@db:5432/clawchats'
+});
 
 // 存储在线用户
 const users = new Map<string, WebSocket>();
@@ -103,13 +117,20 @@ wss.on('connection', (ws, req) => {
   let userId: string | null = null;
   
   // 认证
-  ws.on('message', (data) => {
+  ws.on('message', async (data) => {
     const msg = JSON.parse(data.toString());
     
     if (msg.type === 'auth') {
       if (AUTH_TOKENS.has(msg.token)) {
         userId = msg.userId;
         users.set(userId, ws);
+        
+        // 记录上线状态
+        await pool.query(
+          'INSERT INTO user_sessions (user_id, connected_at) VALUES ($1, NOW()) ON CONFLICT (user_id) DO UPDATE SET connected_at = NOW()',
+          [userId]
+        );
+        
         ws.send(JSON.stringify({ type: 'auth', ok: true }));
       } else {
         ws.send(JSON.stringify({ type: 'auth', ok: false, error: 'Invalid token' }));
@@ -118,8 +139,15 @@ wss.on('connection', (ws, req) => {
       return;
     }
     
-    // 转发消息
+    // 转发消息并持久化
     if (msg.type === 'message' && userId) {
+      // 保存到数据库
+      await pool.query(
+        'INSERT INTO messages (from_user, to_user, content, created_at) VALUES ($1, $2, $3, NOW())',
+        [userId, msg.to, msg.content]
+      );
+      
+      // 实时转发
       const target = users.get(msg.to);
       if (target) {
         target.send(JSON.stringify({
@@ -132,8 +160,11 @@ wss.on('connection', (ws, req) => {
     }
   });
   
-  ws.on('close', () => {
-    if (userId) users.delete(userId);
+  ws.on('close', async () => {
+    if (userId) {
+      users.delete(userId);
+      await pool.query('UPDATE user_sessions SET disconnected_at = NOW() WHERE user_id = $1', [userId]);
+    }
   });
 });
 
@@ -152,6 +183,38 @@ console.log(`Server running on port ${PORT}`);
 
 // 接收消息
 { "type": "message", "from": "user-123", "content": "你好", "timestamp": 1773130000000 }
+```
+
+### 数据库表结构
+
+```sql
+-- init-db/01-init.sql
+
+-- 用户表
+CREATE TABLE users (
+  id VARCHAR(64) PRIMARY KEY,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 用户会话表（在线状态）
+CREATE TABLE user_sessions (
+  user_id VARCHAR(64) PRIMARY KEY REFERENCES users(id),
+  connected_at TIMESTAMP NOT NULL,
+  disconnected_at TIMESTAMP
+);
+
+-- 消息表
+CREATE TABLE messages (
+  id SERIAL PRIMARY KEY,
+  from_user VARCHAR(64) REFERENCES users(id),
+  to_user VARCHAR(64) REFERENCES users(id),
+  content TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 索引
+CREATE INDEX idx_messages_to_user ON messages(to_user);
+CREATE INDEX idx_messages_created ON messages(created_at);
 ```
 
 ---
@@ -284,6 +347,23 @@ export const outbound = {
 version: '3.8'
 
 services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: clawchats
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   server:
     build: ./server
     ports:
@@ -291,6 +371,10 @@ services:
     environment:
       - PORT=8765
       - AUTH_TOKENS=demo-token,test-token
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/clawchats
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
   web:
@@ -300,6 +384,9 @@ services:
     depends_on:
       - server
     restart: unless-stopped
+
+volumes:
+  postgres_data:
 ```
 
 ### Dockerfile (server)
@@ -396,6 +483,8 @@ openclaw gateway restart
 | OpenClaw→Web 消息 | OpenClaw 发送，Web 能收到 |
 | Docker 部署 | `docker-compose up` 后能访问 |
 | 断线重连 | 网络恢复后自动重连 |
+| 消息持久化 | 重启服务器后消息不丢失 |
+| PostgreSQL | 数据库正常运行，数据可查询 |
 
 ---
 
