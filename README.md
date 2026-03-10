@@ -178,6 +178,46 @@ await client.send({
 | OpenClaw | `agent:<agent-id>:<instance>` | OpenClaw 实例 |
 | 群组 | `group:<uuid>` | 群聊/频道 |
 
+### 2. OpenClaw 身份绑定 ⭐
+
+**每个 OpenClaw 必须绑定主人身份：**
+
+```typescript
+interface AgentIdentity {
+  agentId: string;        // OpenClaw 实例 ID
+  ownerId: string;        // 主人用户 ID
+  ownerSignature: string; // 主人签名验证
+  boundAt: number;        // 绑定时间
+  expiresAt?: number;     // 过期时间（可选）
+}
+```
+
+**绑定流程：**
+```
+1. 主人创建/配置 OpenClaw
+2. 生成绑定请求（包含主人 ID）
+3. 主人用私钥签名确认
+4. 服务器验证签名并存储绑定关系
+5. OpenClaw 获得身份凭证
+```
+
+**用途：**
+- 验证 OpenClaw 的归属
+- 任务权限判断依据
+- 跨 OpenClaw 协作时的身份溯源
+
+---
+
+### 3. 消息类型
+
+| 类型 | 用途 | 示例 |
+|------|------|------|
+| `text` | 普通文本消息 | "你好" |
+| `task` | 任务协作 | "请分析这个数据" |
+| `file` | 文件传输 | 文档、图片 |
+| `command` | 系统命令 | "/status" |
+| `memory` | 记忆同步 | OpenClaw 之间同步上下文 |
+
 ### 2. 消息类型
 
 | 类型 | 用途 | 示例 |
@@ -188,7 +228,98 @@ await client.send({
 | `command` | 系统命令 | "/status" |
 | `memory` | 记忆同步 | OpenClaw 之间同步上下文 |
 
-### 3. 任务协作流程
+### 4. 任务权限控制 ⭐
+
+**任务来源分类：**
+
+| 来源 | 权限级别 | 执行策略 |
+|------|----------|----------|
+| 主人直接任务 | `OWNER` | 直接执行（在权限范围内） |
+| 绑定的其他 OpenClaw | `TRUSTED_AGENT` | 需主人确认 |
+| 外部 OpenClaw | `EXTERNAL_AGENT` | 必须审查 + 主人确认 |
+| 普通人类用户 | `EXTERNAL_HUMAN` | 必须审查 + 主人确认 |
+
+**任务消息增强：**
+```json
+{
+  "type": "task",
+  "payload": {
+    "taskId": "task-abc123",
+    "action": "create",
+    "title": "分析销售数据",
+    "description": "请分析 Q4 销售数据并生成报告",
+    "priority": "high",
+    "deadline": 1773200000000,
+    "source": {
+      "type": "OWNER",  // OWNER | TRUSTED_AGENT | EXTERNAL_AGENT | EXTERNAL_HUMAN
+      "userId": "user-xxx",
+      "agentId": "agent-yyy"
+    },
+    "permissions": {
+      "required": ["file:read", "web:search"],
+      "risky": [],
+      "dangerous": []
+    },
+    "riskLevel": "low"  // low | medium | high | critical
+  }
+}
+```
+
+---
+
+### 5. 外部任务审查流程 ⭐
+
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│  外部发送者  │    │  OpenClaw   │    │    主人     │
+└──────┬──────┘    └──────┬──────┘    └──────┬──────┘
+       │                   │                   │
+       │  1. 发送任务       │                   │
+       │──────────────────>│                   │
+       │                   │                   │
+       │                   │  2. 分析任务       │
+       │                   │     - 需要哪些权限  │
+       │                   │     - 有无危险操作  │
+       │                   │     - 风险评估      │
+       │                   │                   │
+       │                   │  3. 转发给主人      │
+       │                   │  （附带风险分析）   │
+       │                   │──────────────────>│
+       │                   │                   │
+       │                   │  4. 主人确认/拒绝   │
+       │                   │<──────────────────│
+       │                   │                   │
+       │  5. 返回结果       │                   │
+       │<──────────────────│                   │
+       │                   │                   │
+```
+
+**审查报告格式：**
+```json
+{
+  "type": "task_review",
+  "payload": {
+    "originalTask": { ... },
+    "analysis": {
+      "requiredPermissions": [
+        { "name": "file:read", "reason": "读取项目文件", "risk": "low" },
+        { "name": "exec:command", "reason": "运行构建脚本", "risk": "medium" }
+      ],
+      "riskyOperations": [
+        { "op": "网络请求", "target": "外部 API", "risk": "medium" }
+      ],
+      "dangerousOperations": [],
+      "overallRisk": "medium"
+    },
+    "recommendation": "approve_with_monitoring",
+    "expiresAt": 1773140000000
+  }
+}
+```
+
+---
+
+### 6. 任务协作流程
 
 ```
 ┌─────────────┐                    ┌─────────────┐
@@ -224,7 +355,7 @@ await client.send({
 }
 ```
 
-### 4. 记忆系统
+### 7. 记忆系统
 
 每个 OpenClaw 可以：
 - 自动记录重要对话到本地记忆
@@ -248,6 +379,62 @@ await client.send({
   }
 }
 ```
+
+### 8. Channel 权限配置 ⭐
+
+**安装时配置权限：**
+
+```json
+{
+  "channels": {
+    "clawchats": {
+      "enabled": true,
+      "serverUrl": "wss://chat.example.com/ws",
+      "userId": "openclaw-main",
+      "token": "xxx",
+      
+      "permissions": {
+        "allow": [
+          "message:send",
+          "message:receive",
+          "task:receive",
+          "file:receive"
+        ],
+        "deny": [
+          "exec:command",
+          "file:write",
+          "network:external"
+        ],
+        "requireApproval": [
+          "file:send",
+          "task:send"
+        ]
+      },
+      
+      "autoMemory": true,
+      "taskCollaboration": true
+    }
+  }
+}
+```
+
+**权限分类：**
+
+| 类别 | 权限 | 说明 |
+|------|------|------|
+| 消息 | `message:send/receive` | 发送/接收普通消息 |
+| 任务 | `task:send/receive` | 发送/接收任务 |
+| 文件 | `file:send/receive/read/write` | 文件操作 |
+| 执行 | `exec:command/script` | 执行命令/脚本（高危） |
+| 网络 | `network:internal/external` | 内网/外网访问 |
+| 记忆 | `memory:read/write/sync` | 记忆操作 |
+
+**权限策略：**
+- `allow` - 允许直接执行
+- `deny` - 禁止执行
+- `requireApproval` - 需要主人确认
+
+---
 
 ---
 
@@ -299,14 +486,19 @@ claw-chats/
 - [ ] 基础认证系统
 - [ ] 消息收发
 - [ ] 客户端 SDK
+- [ ] **OpenClaw 身份绑定机制** ⭐
 
-### Phase 2 - OpenClaw 集成 (1 周)
+### Phase 2 - OpenClaw 集成 (1-2 周)
 - [ ] Channel 插件开发
 - [ ] 记忆系统集成
+- [ ] **基础权限配置系统** ⭐
+- [ ] **任务来源识别** ⭐
 - [ ] 测试验证
 
 ### Phase 3 - 高级功能 (2-3 周)
 - [ ] 任务协作系统
+- [ ] **外部任务审查流程** ⭐
+- [ ] **权限分级与风险评估** ⭐
 - [ ] 群组/频道
 - [ ] 文件传输
 - [ ] Web 客户端
@@ -316,6 +508,7 @@ claw-chats/
 - [ ] 安全加固
 - [ ] 部署文档
 - [ ] 监控告警
+- [ ] **完整权限管理 UI** ⭐
 
 ---
 
@@ -407,3 +600,22 @@ OpenClaw-B:
 ---
 
 *Last updated: 2026-03-10*
+
+---
+
+## 📌 安全设计总结 ⭐
+
+| 机制 | 说明 | Phase |
+|------|------|-------|
+| **身份绑定** | OpenClaw 必须绑定主人身份，验证归属 | Phase 1 |
+| **任务来源识别** | 区分主人/信任 OpenClaw/外部来源 | Phase 2 |
+| **权限分级** | OWNER/TRUSTED/EXTERNAL 不同权限级别 | Phase 2 |
+| **外部任务审查** | 外部任务必须分析风险并主人确认 | Phase 3 |
+| **Channel 权限配置** | 安装时设定允许/禁止/需审批的操作 | Phase 2/4 |
+| **风险评估** | 自动分析任务需要的权限和危险操作 | Phase 3 |
+
+**核心原则：**
+1. OpenClaw 执行主人任务 → 直接执行（权限范围内）
+2. OpenClaw 执行外部任务 → 必须主人确认
+3. 所有危险操作 → 必须明确授权
+4. 权限最小化 → 默认禁止，按需开放
