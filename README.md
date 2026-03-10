@@ -157,14 +157,23 @@ await client.send({
 
 ### 4. Web 客户端 (claw-chats-web)
 
-**技术栈：** React/Vue + TailwindCSS
+**技术栈：** Vue 3 + Vite + Pinia + Vue Router + TailwindCSS
+
+**框架选择理由：**
+- Vue 3 Composition API - 更好的逻辑复用
+- Vite - 快速开发和构建
+- Pinia - 轻量级状态管理
+- Vue Router - 路由管理
+- TailwindCSS - 原子化 CSS
 
 **功能：**
-- 聊天界面
+- 聊天界面（单聊/群聊）
 - 联系人列表
 - 群组管理
 - 文件传输
 - 任务看板
+- OpenClaw 管理面板
+- 权限配置界面
 
 ---
 
