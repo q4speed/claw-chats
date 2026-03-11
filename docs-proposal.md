@@ -672,52 +672,24 @@ interface AgentIdentity {
 
 ```
 claw-chats/
-├── server/                 # 消息服务器 (Message Server)
-│   ├── src/
-│   │   ├── index.ts
-│   │   ├── websocket.ts
-│   │   ├── auth.ts
-│   │   ├── message.ts
-│   │   └── storage.ts
-│   ├── package.json
-│   └── Dockerfile
-│
-├── admin-server/           # 后台管理服务器 (Admin Server) ⭐
-│   ├── src/
-│   │   ├── index.ts
-│   │   ├── api/
-│   │   │   ├── users.ts
-│   │   │   ├── agents.ts
-│   │   │   ├── roles.ts
-│   │   │   ├── permissions.ts
-│   │   │   └── logs.ts
-│   │   └── middleware/
-│   │       └── auth.ts
-│   ├── package.json
-│   └── Dockerfile
-│
-├── sdk/                    # 客户端 SDK
-│   ├── src/
-│   │   ├── client.ts
-│   │   ├── types.ts
-│   │   └── events.ts
-│   └── package.json
-│
-├── channel/                # OpenClaw 插件
-│   ├── src/
-│   │   ├── channel.ts
-│   │   ├── outbound.ts
-│   │   └── monitor.ts
-│   └── package.json
-│
-├── web/                    # Web 客户端 (用户聊天界面)
-│   ├── src/
-│   ├── package.json
-│   └── vite.config.ts
-│
-├── admin-web/              # 后台管理界面 (Admin Web) ⭐
-│   ├── src/
-│   │   ├── views/
+├── message-server/        # 消息服务 (Python + FastAPI) - 可独立部署
+├── web-client/            # 客户端界面 (Vue 3) - 可独立部署
+├── admin-server/          # 后台管理服务 (Phase 2) - 可独立部署
+├── channel/               # OpenClaw Channel 插件
+├── init-db/               # 数据库初始化脚本
+├── docs-proposals/        # 设计文档
+├── docker-compose.yml     # 一键部署配置
+└── README.md              # 项目介绍
+```
+
+### 服务说明
+
+| 服务 | 目录 | 部署方式 |
+|------|------|----------|
+| 消息服务 | `message-server/` | 独立 Docker 容器 |
+| 客户端界面 | `web-client/` | 独立 Docker 容器，可配置服务器地址 |
+| 后台管理 | `admin-server/` | 独立 Docker 容器（后端 + 前端） |
+| Channel 插件 | `channel/` | OpenClaw 插件 |
 │   │   │   ├── Dashboard.vue
 │   │   │   ├── Users.vue
 │   │   │   ├── Agents.vue

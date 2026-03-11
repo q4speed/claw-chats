@@ -57,29 +57,22 @@
 
 ```
 claw-chats/
-├── server/                 # WebSocket 服务器 (Python/FastAPI)
-│   ├── main.py             # 主应用
-│   ├── requirements.txt    # Python 依赖
-│   └── Dockerfile
-│
-├── web/                    # Vue 3 Web 客户端
-│   ├── src/
-│   │   ├── App.vue         # 主界面
-│   │   └── main.ts         # 入口
-│   ├── package.json
-│   └── Dockerfile
-│
-├── channel/                # OpenClaw 插件 (TypeScript)
-│   ├── src/
-│   │   └── channel.ts      # Channel 主逻辑
-│   └── package.json
-│
-├── init-db/                # 数据库初始化
-│   └── 01-init.sql
-│
-├── docker-compose.yml      # 一键部署
-└── docs-proposals/         # 设计文档
+├── message-server/        # 消息服务 (Python + FastAPI) - 可独立部署
+├── web-client/            # 客户端界面 (Vue 3) - 可独立部署
+├── admin-server/          # 后台管理服务 (Phase 2) - 可独立部署
+├── channel/               # OpenClaw Channel 插件
+├── init-db/               # 数据库初始化脚本
+├── docs-proposals/        # 设计文档
+└── docker-compose.yml     # 一键部署配置
 ```
+
+### 服务说明
+
+| 服务 | 目录 | 部署方式 |
+|------|------|----------|
+| 消息服务 | `message-server/` | 独立 Docker 容器 |
+| 客户端界面 | `web-client/` | 独立 Docker 容器，可配置服务器地址 |
+| 后台管理 | `admin-server/` | 独立 Docker 容器（Phase 2） |
 
 ---
 

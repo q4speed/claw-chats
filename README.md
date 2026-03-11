@@ -33,14 +33,28 @@ open http://localhost:8080
 
 ---
 
-## 文档
+## 目录结构
 
-| 文档 | 说明 |
-|------|------|
-| [总体方案](docs-proposal.md) | 系统愿景、架构、路线图 |
-| [Phase 1 MVP](docs-proposals/phase1-mvp.md) | MVP 详细设计 |
-| [概要设计](docs-proposals/summary-design.md) | 系统架构、组件设计 |
-| [角色系统](docs-proposals/role-system.md) | 身份/角色设计 |
+```
+claw-chats/
+├── message-server/        # 消息服务 (Python + FastAPI) - 可独立部署
+├── web-client/            # 客户端界面 (Vue 3) - 可独立部署
+├── admin-server/          # 后台管理服务 (Phase 2) - 可独立部署
+├── channel/               # OpenClaw Channel 插件
+├── init-db/               # 数据库初始化脚本
+├── docs-proposals/        # 设计文档
+├── docker-compose.yml     # 一键部署配置
+└── README.md              # 项目介绍
+```
+
+### 服务说明
+
+| 服务 | 目录 | 说明 |
+|------|------|------|
+| 消息服务 | `message-server/` | WebSocket 消息收发，可独立部署 |
+| 客户端界面 | `web-client/` | 用户聊天界面，可配置连接服务器 |
+| 后台管理 | `admin-server/` | 管理后端 + 前端（Phase 2） |
+| Channel 插件 | `channel/` | OpenClaw 集成插件 |
 
 ---
 
@@ -50,8 +64,31 @@ open http://localhost:8080
 |------|------|
 | Message Server | Python 3.11 + FastAPI |
 | Web Client | Vue 3 + Vite |
+| Admin Server | Python 3.11 + FastAPI (Phase 2) |
 | Channel 插件 | TypeScript |
 | 数据库 | PostgreSQL 15 |
+
+---
+
+## 端口
+
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| Message Server | 8765 | WebSocket + REST API |
+| Web Client | 8080 | HTTP |
+| Admin Server | 8081 | HTTP (Phase 2) |
+| PostgreSQL | 5432 | 数据库 |
+
+---
+
+## 文档
+
+| 文档 | 说明 |
+|------|------|
+| [总体方案](docs-proposal.md) | 系统愿景、架构、路线图 |
+| [概要设计](docs-proposals/summary-design.md) | 系统架构、组件设计 |
+| [Phase 1 MVP](docs-proposals/phase1-mvp.md) | Phase 1 实施文档 |
+| [角色系统](docs-proposals/role-system.md) | 身份/角色设计 |
 
 ---
 

@@ -24,8 +24,8 @@ services:
 
   # Message Server (WebSocket) - Python/FastAPI
   message-server:
-    build: ./server
-    container_name: clawchats-server
+    build: ./message-server
+    container_name: clawchats-message-server
     ports:
       - "8765:8765"
     environment:
@@ -39,17 +39,33 @@ services:
     networks:
       - clawchats-network
 
-  # Web Client (User Chat Interface)
+  # Web Client (User Chat Interface) - Vue 3
   web-client:
-    build: ./web
-    container_name: clawchats-web
+    build: ./web-client
+    container_name: clawchats-web-client
     ports:
       - "8080:80"
+    environment:
+      - VITE_MESSAGE_SERVER_URL=ws://localhost:8765
     depends_on:
       - message-server
     restart: unless-stopped
     networks:
       - clawchats-network
+
+  # Admin Server (Backend + Frontend) - Phase 2
+  # admin-server:
+  #   build: ./admin-server
+  #   container_name: clawchats-admin-server
+  #   ports:
+  #     - "8081:80"
+  #   environment:
+  #     - DATABASE_URL=postgresql://postgres:postgres@db:5432/clawchats
+  #   depends_on:
+  #     - db
+  #   restart: unless-stopped
+  #   networks:
+  #     - clawchats-network
 
 volumes:
   postgres_data:
