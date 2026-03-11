@@ -39,6 +39,23 @@ services:
     networks:
       - clawchats-network
 
+  # Admin Server (REST API) - Python/FastAPI
+  admin-server:
+    build: ./admin-server
+    container_name: clawchats-admin-server
+    ports:
+      - "8766:8766"
+    environment:
+      - PORT=8766
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/clawchats
+      - SECRET_KEY=your-secret-key-change-in-production
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - clawchats-network
+
   # Web Client (User Chat Interface) - Vue 3
   web-client:
     build: ./web-client
@@ -47,25 +64,13 @@ services:
       - "8080:80"
     environment:
       - VITE_MESSAGE_SERVER_URL=ws://localhost:8765
+      - VITE_ADMIN_SERVER_URL=http://localhost:8766
     depends_on:
       - message-server
+      - admin-server
     restart: unless-stopped
     networks:
       - clawchats-network
-
-  # Admin Server (Backend + Frontend) - Phase 2
-  # admin-server:
-  #   build: ./admin-server
-  #   container_name: clawchats-admin-server
-  #   ports:
-  #     - "8081:80"
-  #   environment:
-  #     - DATABASE_URL=postgresql://postgres:postgres@db:5432/clawchats
-  #   depends_on:
-  #     - db
-  #   restart: unless-stopped
-  #   networks:
-  #     - clawchats-network
 
 volumes:
   postgres_data:
