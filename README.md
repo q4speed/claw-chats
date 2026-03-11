@@ -85,7 +85,7 @@ claw-chats/
 
 | 文档 | 说明 |
 |------|------|
-| [总体方案](docs-proposal.md) | 系统愿景、架构、路线图 |
+| [总体方案](docs-proposals/overall-plan.md) | 系统愿景、架构、路线图 |
 | [概要设计](docs-proposals/summary-design.md) | 系统架构、组件设计 |
 | [Phase 1 MVP](docs-proposals/phase1-mvp.md) | Phase 1 实施文档 |
 | [角色系统](docs-proposals/role-system.md) | 身份/角色设计 |

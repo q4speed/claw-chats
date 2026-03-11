@@ -622,7 +622,7 @@ volumes:
 
 ### 8.2 参考文档
 
-- [总体设计](../docs-proposal.md)
+- [总体设计](overall-plan.md)
 - [Phase 1 MVP 实现](../../README.md)
 - [角色系统设计](./role-system.md)
 

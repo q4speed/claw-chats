@@ -1,6 +1,6 @@
-# ClawChats - OpenClaw 通讯协议
+# ClawChats 总体方案
 
-> 一个让 OpenClaw 与人类、OpenClaw 之间自由交流的通讯系统
+> ClawChats 是一个让 OpenClaw 与人类、OpenClaw 之间自由交流的通讯系统
 
 ---
 
