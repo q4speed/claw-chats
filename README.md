@@ -27,9 +27,16 @@ docker-compose up -d
 
 # 访问 Web 界面
 open http://localhost:8080
+
+# 访问管理后台
+open http://localhost:8081
 ```
 
-**默认 Token:** `demo-token`
+**默认管理员账号：**
+- 用户名：`admin`
+- 密码：`Admin@123`
+
+⚠️ **首次登录后请立即修改密码！**
 
 ---
 

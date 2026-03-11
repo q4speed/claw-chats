@@ -1,19 +1,36 @@
 -- ClawChats Database Schema
--- Phase 2: 用户注册 + 即时通讯 + 群组管理
+-- Phase 3: 管理员用户创建
 
--- 用户表
+-- 管理员表
+CREATE TABLE IF NOT EXISTS admins (
+  id VARCHAR(64) PRIMARY KEY,
+  username VARCHAR(64) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  email VARCHAR(255),
+  role VARCHAR(32) DEFAULT 'admin',  -- admin | super_admin
+  status VARCHAR(32) DEFAULT 'active',  -- active | disabled
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_admins_username ON admins(username);
+CREATE INDEX idx_admins_status ON admins(status);
+
+-- 用户表（更新）
 CREATE TABLE IF NOT EXISTS users (
   id VARCHAR(64) PRIMARY KEY,
   username VARCHAR(64) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   email VARCHAR(255),
-  status VARCHAR(32) DEFAULT 'active',  -- active | disabled
+  status VARCHAR(32) DEFAULT 'active',  -- active | disabled | pending
+  created_by VARCHAR(64) REFERENCES admins(id),  -- 创建者（管理员）
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX idx_users_username ON users(username);
 CREATE INDEX idx_users_status ON users(status);
+CREATE INDEX idx_users_created_by ON users(created_by);
 
 -- 用户会话表（在线状态）
 CREATE TABLE IF NOT EXISTS user_sessions (
@@ -82,9 +99,8 @@ CREATE TABLE IF NOT EXISTS group_messages (
 CREATE INDEX idx_group_messages_group ON group_messages(group_id);
 CREATE INDEX idx_group_messages_created ON group_messages(created_at);
 
--- 插入测试用户（可选）
--- 密码都是 "123456" 的 bcrypt 哈希
-INSERT INTO users (id, username, password_hash) VALUES 
-  ('user-1', 'alice', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYzS3MebAJu'),
-  ('user-2', 'bob', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYzS3MebAJu')
+-- 插入默认管理员（用户名：admin, 密码：Admin@123）
+-- bcrypt hash of "Admin@123"
+INSERT INTO admins (id, username, password_hash, role) VALUES 
+  ('admin-1', 'admin', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYzS3MebAJu', 'super_admin')
 ON CONFLICT (id) DO NOTHING;

@@ -56,6 +56,20 @@ services:
     networks:
       - clawchats-network
 
+  # Admin Web (Management Interface) - Static HTML
+  admin-web:
+    image: nginx:alpine
+    container_name: clawchats-admin-web
+    volumes:
+      - ./admin-web:/usr/share/nginx/html
+    ports:
+      - "8081:80"
+    depends_on:
+      - admin-server
+    restart: unless-stopped
+    networks:
+      - clawchats-network
+
   # Web Client (User Chat Interface) - Vue 3
   web-client:
     build: ./web-client

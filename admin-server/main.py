@@ -1,16 +1,18 @@
 """
-ClawChats Admin Server - Phase 2
-REST API for user registration, authentication, and group management
+ClawChats Admin Server - Phase 3
+管理员用户创建系统 - 关闭普通注册，仅管理员可创建用户
 """
 
 import os
+import re
 import uuid
 import bcrypt
 from datetime import datetime, timedelta
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, validator
 import asyncpg
 from jose import JWTError, jwt
 
@@ -22,10 +24,10 @@ DATABASE_URL = os.getenv(
 )
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 # FastAPI app
-app = FastAPI(title="ClawChats Admin Server", version="0.2.0")
+app = FastAPI(title="ClawChats Admin Server", version="0.3.0")
 
 # CORS
 app.add_middleware(
@@ -36,68 +38,70 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Security
+security = HTTPBearer()
+
 # Database pool
 db_pool: Optional[asyncpg.Pool] = None
 
 
 # ============== Pydantic Models ==============
 
-class UserRegister(BaseModel):
+class AdminLogin(BaseModel):
+    username: str
+    password: str
+
+
+class UserCreate(BaseModel):
     username: str
     password: str
     email: Optional[str] = None
-
-
-class UserLogin(BaseModel):
-    username: str
-    password: str
+    
+    @validator('username')
+    def validate_username(cls, v):
+        # 用户名：6-20 位，字母数字下划线，不能以数字开头
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]{5,19}$', v):
+            raise ValueError('用户名长度 6-20 位，仅支持字母、数字、下划线，不能以数字开头')
+        return v
+    
+    @validator('password')
+    def validate_password(cls, v):
+        # 密码：8-16 位，包含大写 + 小写 + 数字 + 特殊符号
+        if len(v) < 8 or len(v) > 16:
+            raise ValueError('密码长度必须为 8-16 位')
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('密码必须包含大写字母')
+        if not re.search(r'[a-z]', v):
+            raise ValueError('密码必须包含小写字母')
+        if not re.search(r'[0-9]', v):
+            raise ValueError('密码必须包含数字')
+        if not re.search(r'[!@#$%^&*(),.?":{}|<>]', v):
+            raise ValueError('密码必须包含特殊符号（!@#$%^&* 等）')
+        return v
 
 
 class Token(BaseModel):
     access_token: str
     token_type: str
-    user_id: str
+    admin_id: str
     username: str
-
-
-class UserSearch(BaseModel):
-    username: str
-
-
-class GroupCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
-
-
-class GroupMemberAdd(BaseModel):
-    username: str
-
-
-class GroupMemberRemove(BaseModel):
-    user_id: str
+    role: str
 
 
 class UserResponse(BaseModel):
     id: str
     username: str
     email: Optional[str]
+    status: str
     created_at: datetime
+    created_by: Optional[str]
 
 
-class GroupResponse(BaseModel):
-    id: str
-    name: str
-    description: Optional[str]
-    owner_id: str
-    created_at: datetime
-    member_count: int
-
-
-class GroupMemberResponse(BaseModel):
+class AdminCreateUserResult(BaseModel):
+    message: str
     user_id: str
     username: str
-    role: str
-    joined_at: datetime
+    temporary_password: str  # 初始密码（用于交付）
 
 
 # ============== Database Functions ==============
@@ -130,15 +134,34 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
 
-async def get_current_user(token: str = Depends(lambda: None)) -> Optional[dict]:
-    # Simplified for now - will implement proper token validation
-    return None
+async def get_current_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """验证管理员身份"""
+    db = await get_db()
+    token = credentials.credentials
+    
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        admin_id = payload.get("sub")
+        if admin_id is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    admin = await db.fetchrow(
+        "SELECT id, username, role FROM admins WHERE id = $1 AND status = 'active'",
+        admin_id
+    )
+    
+    if not admin:
+        raise HTTPException(status_code=401, detail="管理员不存在或已禁用")
+    
+    return admin
 
 
 # ============== API Routes ==============
@@ -154,124 +177,158 @@ async def health_check():
     return {"status": "healthy"}
 
 
-@app.post("/api/v1/auth/register", status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserRegister):
-    """用户注册"""
+# ============== Admin Authentication ==============
+
+@app.post("/api/v1/admin/login")
+async def admin_login(credentials: AdminLogin):
+    """管理员登录"""
     db = await get_db()
     
-    # Validate username length
-    if len(user_data.username) < 3 or len(user_data.username) > 64:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="用户名长度必须在 3-64 个字符之间"
-        )
-    
-    # Validate password complexity
-    if len(user_data.password) < 6:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="密码长度至少为 6 个字符"
-        )
-    
-    # Check username uniqueness
-    existing = await db.fetchrow(
-        "SELECT id FROM users WHERE username = $1",
-        user_data.username
-    )
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="该用户名已存在，请更换其他用户名"
-        )
-    
-    # Create user
-    user_id = f"user-{uuid.uuid4().hex[:12]}"
-    password_hash = get_password_hash(user_data.password)
-    
-    try:
-        await db.execute(
-            """
-            INSERT INTO users (id, username, password_hash, email, created_at)
-            VALUES ($1, $2, $3, $4, NOW())
-            """,
-            user_id, user_data.username, password_hash, user_data.email
-        )
-        
-        return {
-            "message": "注册成功",
-            "user_id": user_id,
-            "username": user_data.username
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"注册失败：{str(e)}"
-        )
-
-
-@app.post("/api/v1/auth/login")
-async def login(credentials: UserLogin):
-    """用户登录"""
-    db = await get_db()
-    
-    # Find user by username
-    user = await db.fetchrow(
-        "SELECT id, username, password_hash, email FROM users WHERE username = $1 AND status = 'active'",
+    admin = await db.fetchrow(
+        "SELECT id, username, password_hash, role FROM admins WHERE username = $1 AND status = 'active'",
         credentials.username
     )
     
-    if not user:
+    if not admin:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码错误"
         )
     
-    # Verify password
-    if not verify_password(credentials.password, user["password_hash"]):
+    if not verify_password(credentials.password, admin["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码错误"
         )
     
-    # Generate token
     access_token = create_access_token(
-        data={"sub": user["id"], "username": user["username"]},
+        data={"sub": admin["id"], "username": admin["username"], "role": admin["role"]},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user_id": user["id"],
-        "username": user["username"]
+        "admin_id": admin["id"],
+        "username": admin["username"],
+        "role": admin["role"]
     }
 
 
-@app.get("/api/v1/users/search")
-async def search_users(q: str):
-    """搜索用户"""
+# ============== User Management (Admin Only) ==============
+
+@app.post("/api/v1/admin/users", status_code=status.HTTP_201_CREATED)
+async def admin_create_user(
+    user_data: UserCreate,
+    current_admin: dict = Depends(get_current_admin)
+):
+    """
+    管理员创建用户
+    - 关闭普通用户注册
+    - 仅管理员可创建
+    - 用户名/密码规范校验
+    - 用户名唯一性校验
+    """
     db = await get_db()
     
-    users = await db.fetch(
-        """
-        SELECT id, username, email, created_at
-        FROM users
-        WHERE username ILIKE $1 AND status = 'active'
-        LIMIT 20
-        """,
-        f"%{q}%"
+    # 用户名唯一性校验（检查普通用户表和管理员表）
+    existing_user = await db.fetchrow(
+        "SELECT id FROM users WHERE username = $1",
+        user_data.username
     )
+    
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该用户名已存在，请更换其他用户名"
+        )
+    
+    # 检查管理员表
+    existing_admin = await db.fetchrow(
+        "SELECT id FROM admins WHERE username = $1",
+        user_data.username
+    )
+    
+    if existing_admin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该用户名已存在，请更换其他用户名"
+        )
+    
+    # 创建用户
+    user_id = f"user-{uuid.uuid4().hex[:12]}"
+    password_hash = get_password_hash(user_data.password)
+    
+    try:
+        await db.execute(
+            """
+            INSERT INTO users (id, username, password_hash, email, created_by, status, created_at)
+            VALUES ($1, $2, $3, $4, $5, 'active', NOW())
+            """,
+            user_id, user_data.username, password_hash, user_data.email, current_admin["id"]
+        )
+        
+        return {
+            "message": "用户创建成功",
+            "user_id": user_id,
+            "username": user_data.username,
+            "temporary_password": user_data.password,  # 初始密码（管理员需线下交付）
+            "created_by": current_admin["username"]
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"创建失败：{str(e)}"
+        )
+
+
+@app.get("/api/v1/admin/users")
+async def list_users(
+    current_admin: dict = Depends(get_current_admin),
+    status_filter: Optional[str] = None
+):
+    """获取用户列表（管理员专用）"""
+    db = await get_db()
+    
+    if status_filter:
+        users = await db.fetch(
+            """
+            SELECT u.id, u.username, u.email, u.status, u.created_at, u.created_by, a.username as creator_name
+            FROM users u
+            LEFT JOIN admins a ON u.created_by = a.id
+            WHERE u.status = $1
+            ORDER BY u.created_at DESC
+            """,
+            status_filter
+        )
+    else:
+        users = await db.fetch(
+            """
+            SELECT u.id, u.username, u.email, u.status, u.created_at, u.created_by, a.username as creator_name
+            FROM users u
+            LEFT JOIN admins a ON u.created_by = a.id
+            ORDER BY u.created_at DESC
+            """
+        )
     
     return [dict(user) for user in users]
 
 
-@app.get("/api/v1/users/{user_id}")
-async def get_user(user_id: str):
-    """获取用户信息"""
+@app.get("/api/v1/admin/users/{user_id}")
+async def get_user(
+    user_id: str,
+    current_admin: dict = Depends(get_current_admin)
+):
+    """获取用户详情（管理员专用）"""
     db = await get_db()
     
     user = await db.fetchrow(
-        "SELECT id, username, email, created_at FROM users WHERE id = $1",
+        """
+        SELECT u.id, u.username, u.email, u.status, u.created_at, u.created_by, a.username as creator_name
+        FROM users u
+        LEFT JOIN admins a ON u.created_by = a.id
+        WHERE u.id = $1
+        """,
         user_id
     )
     
@@ -281,161 +338,78 @@ async def get_user(user_id: str):
     return dict(user)
 
 
-# ============== Group Management ==============
-
-@app.post("/api/v1/groups", status_code=status.HTTP_201_CREATED)
-async def create_group(group_data: GroupCreate, owner_id: str = "user-1"):
-    """创建群组"""
+@app.delete("/api/v1/admin/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    current_admin: dict = Depends(get_current_admin)
+):
+    """删除用户（管理员专用）"""
     db = await get_db()
     
-    group_id = f"group-{uuid.uuid4().hex[:12]}"
+    await db.execute("DELETE FROM users WHERE id = $1", user_id)
     
-    try:
-        async with db.transaction():
-            # Create group
-            await db.execute(
-                """
-                INSERT INTO groups (id, name, description, owner_id, created_at)
-                VALUES ($1, $2, $3, $4, NOW())
-                """,
-                group_id, group_data.name, group_data.description, owner_id
-            )
-            
-            # Add owner as admin
-            await db.execute(
-                """
-                INSERT INTO group_members (group_id, user_id, role, joined_at)
-                VALUES ($1, $2, 'admin', NOW())
-                """,
-                group_id, owner_id
-            )
-        
-        return {
-            "message": "群组创建成功",
-            "group_id": group_id,
-            "name": group_data.name
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"创建失败：{str(e)}"
-        )
+    return {"message": "用户已删除"}
 
 
-@app.get("/api/v1/groups/{group_id}")
-async def get_group(group_id: str):
-    """获取群组信息"""
+@app.post("/api/v1/admin/users/{user_id}/toggle-status")
+async def toggle_user_status(
+    user_id: str,
+    current_admin: dict = Depends(get_current_admin)
+):
+    """切换用户状态（激活/禁用）"""
     db = await get_db()
     
-    group = await db.fetchrow(
-        """
-        SELECT g.id, g.name, g.description, g.owner_id, g.created_at,
-               COUNT(m.user_id) as member_count
-        FROM groups g
-        LEFT JOIN group_members m ON g.id = m.group_id
-        WHERE g.id = $1
-        GROUP BY g.id
-        """,
-        group_id
-    )
-    
-    if not group:
-        raise HTTPException(status_code=404, detail="群组不存在")
-    
-    return dict(group)
-
-
-@app.get("/api/v1/groups/{group_id}/members")
-async def get_group_members(group_id: str):
-    """获取群成员列表"""
-    db = await get_db()
-    
-    members = await db.fetch(
-        """
-        SELECT m.user_id, u.username, m.role, m.joined_at
-        FROM group_members m
-        JOIN users u ON m.user_id = u.id
-        WHERE m.group_id = $1
-        ORDER BY m.joined_at
-        """,
-        group_id
-    )
-    
-    return [dict(member) for member in members]
-
-
-@app.post("/api/v1/groups/{group_id}/members/add")
-async def add_group_member(group_id: str, member_data: GroupMemberAdd):
-    """添加群成员"""
-    db = await get_db()
-    
-    # Find user by username
-    user = await db.fetchrow(
-        "SELECT id FROM users WHERE username = $1 AND status = 'active'",
-        member_data.username
-    )
-    
+    user = await db.fetchrow("SELECT status FROM users WHERE id = $1", user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     
-    try:
-        await db.execute(
-            """
-            INSERT INTO group_members (group_id, user_id, role, joined_at)
-            VALUES ($1, $2, 'member', NOW())
-            ON CONFLICT (group_id, user_id) DO NOTHING
-            """,
-            group_id, user["id"]
-        )
-        
-        return {"message": "添加成功", "user_id": user["id"]}
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"添加失败：{str(e)}"
-        )
-
-
-@app.post("/api/v1/groups/{group_id}/members/remove")
-async def remove_group_member(group_id: str, member_data: GroupMemberRemove):
-    """移除群成员（退出群组）"""
-    db = await get_db()
+    new_status = 'disabled' if user['status'] == 'active' else 'active'
     
-    try:
-        await db.execute(
-            """
-            DELETE FROM group_members
-            WHERE group_id = $1 AND user_id = $2
-            """,
-            group_id, member_data.user_id
-        )
-        
-        return {"message": "已成功退出群组"}
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"操作失败：{str(e)}"
-        )
-
-
-@app.get("/api/v1/users/{user_id}/groups")
-async def get_user_groups(user_id: str):
-    """获取用户加入的群组列表"""
-    db = await get_db()
-    
-    groups = await db.fetch(
-        """
-        SELECT g.id, g.name, g.description, g.owner_id, g.created_at,
-               m.role as user_role
-        FROM groups g
-        JOIN group_members m ON g.id = m.group_id
-        WHERE m.user_id = $1 AND g.status = 'active'
-        ORDER BY g.created_at DESC
-        """,
-        user_id
+    await db.execute(
+        "UPDATE users SET status = $1, updated_at = NOW() WHERE id = $2",
+        new_status, user_id
     )
     
-    return [dict(group) for group in groups]
+    return {"message": f"用户已{new_status}", "new_status": new_status}
+
+
+# ============== Username Validation API ==============
+
+@app.get("/api/v1/admin/users/check-username/{username}")
+async def check_username_availability(
+    username: str,
+    current_admin: dict = Depends(get_current_admin)
+):
+    """
+    实时校验用户名唯一性
+    返回：available=true(可用) | available=false(已存在)
+    """
+    db = await get_db()
+    
+    # 检查普通用户表
+    existing_user = await db.fetchrow(
+        "SELECT id FROM users WHERE username = $1",
+        username
+    )
+    
+    if existing_user:
+        return {"available": False, "message": "该用户名已存在，请更换其他用户名"}
+    
+    # 检查管理员表
+    existing_admin = await db.fetchrow(
+        "SELECT id FROM admins WHERE username = $1",
+        username
+    )
+    
+    if existing_admin:
+        return {"available": False, "message": "该用户名已存在，请更换其他用户名"}
+    
+    return {"available": True, "message": "用户名可用"}
+
+
+# ============== Deprecated: Public Registration (Removed) ==============
+# 普通用户注册已关闭，仅管理员可创建用户
+# POST /api/v1/auth/register - REMOVED
 
 
 if __name__ == "__main__":

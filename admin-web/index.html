@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClawChats Admin - 用户管理</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+  <div id="app" class="min-h-screen">
+    <!-- 管理员登录 -->
+    <div v-if="!isAdmin" class="flex items-center justify-center min-h-screen">
+      <div class="bg-white p-8 rounded-lg shadow-md w-96">
+        <h1 class="text-2xl font-bold text-center mb-6">🦞 ClawChats Admin</h1>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">管理员用户名</label>
+            <input v-model="loginForm.username" type="text" class="w-full px-3 py-2 border rounded-md" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">密码</label>
+            <input v-model="loginForm.password" type="password" class="w-full px-3 py-2 border rounded-md" />
+          </div>
+          <button @click="adminLogin" class="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700">登录</button>
+          <p v-if="error" class="text-red-500 text-sm">{{ error }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 管理界面 -->
+    <div v-else class="flex h-screen">
+      <!-- 侧边栏 -->
+      <div class="w-64 bg-white border-r">
+        <div class="p-4 border-b">
+          <h2 class="font-bold">🦞 管理后台</h2>
+          <p class="text-sm text-gray-500">{{ admin.username }}</p>
+        </div>
+        <nav class="p-4 space-y-2">
+          <a @click="currentView = 'create'" :class="['block p-2 rounded cursor-pointer', currentView==='create' ? 'bg-blue-50 text-blue-600' : '']">创建用户</a>
+          <a @click="currentView = 'list'" :class="['block p-2 rounded cursor-pointer', currentView==='list' ? 'bg-blue-50 text-blue-600' : '']">用户列表</a>
+          <a @click="logout" class="block p-2 rounded text-red-600 cursor-pointer hover:bg-red-50">退出登录</a>
+        </nav>
+      </div>
+
+      <!-- 主内容区 -->
+      <div class="flex-1 overflow-y-auto p-8">
+        <!-- 创建用户 -->
+        <div v-if="currentView === 'create'" class="max-w-2xl">
+          <h2 class="text-2xl font-bold mb-6">创建用户</h2>
+          <div class="bg-white p-6 rounded-lg shadow">
+            <div class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">用户名 <span class="text-gray-500 text-xs">(6-20 位，字母数字下划线，不能以数字开头)</span></label>
+                <input 
+                  v-model="userForm.username" 
+                  @input="checkUsername"
+                  type="text" 
+                  placeholder="例如：user_001"
+                  class="w-full px-3 py-2 border rounded-md"
+                />
+                <p v-if="usernameError" class="text-red-500 text-sm mt-1">{{ usernameError }}</p>
+                <p v-if="usernameSuccess" class="text-green-500 text-sm mt-1">{{ usernameSuccess }}</p>
+              </div>
+              
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">密码 <span class="text-gray-500 text-xs">(8-16 位，包含大写 + 小写 + 数字 + 特殊符号)</span></label>
+                <input 
+                  v-model="userForm.password" 
+                  type="password" 
+                  placeholder="例如：Admin@123"
+                  class="w-full px-3 py-2 border rounded-md"
+                />
+                <div class="text-xs text-gray-500 mt-1">
+                  <p :class="passwordRules.upper ? 'text-green-500' : ''">✓ 大写字母</p>
+                  <p :class="passwordRules.lower ? 'text-green-500' : ''">✓ 小写字母</p>
+                  <p :class="passwordRules.digit ? 'text-green-500' : ''">✓ 数字</p>
+                  <p :class="passwordRules.special ? 'text-green-500' : ''">✓ 特殊符号</p>
+                  <p :class="passwordRules.length ? 'text-green-500' : ''">✓ 长度 8-16 位</p>
+                </div>
+              </div>
+              
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">邮箱（可选）</label>
+                <input v-model="userForm.email" type="email" class="w-full px-3 py-2 border rounded-md" />
+              </div>
+              
+              <button @click="createUser" class="w-full bg-green-600 text-white py-2 rounded-md hover:bg-green-700">创建用户</button>
+              
+              <!-- 创建成功提示 -->
+              <div v-if="createSuccess" class="bg-green-50 border border-green-200 rounded p-4">
+                <h3 class="font-bold text-green-800">✅ 用户创建成功！</h3>
+                <div class="mt-2 text-sm text-green-700">
+                  <p><strong>用户名：</strong>{{ createSuccess.username }}</p>
+                  <p><strong>初始密码：</strong><code class="bg-white px-2 py-1 rounded">{{ createSuccess.password }}</code></p>
+                  <p class="mt-2 text-red-600">⚠️ 请将用户名和密码线下交付给用户，并提醒用户首次登录后修改密码。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 用户列表 -->
+        <div v-if="currentView === 'list'" class="max-w-4xl">
+          <h2 class="text-2xl font-bold mb-6">用户列表</h2>
+          <div class="bg-white rounded-lg shadow overflow-hidden">
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">用户名</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">邮箱</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">创建者</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">创建时间</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">操作</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr v-for="user in users" :key="user.id">
+                  <td class="px-6 py-4">{{ user.username }}</td>
+                  <td class="px-6 py-4">{{ user.email || '-' }}</td>
+                  <td class="px-6 py-4">
+                    <span :class="['px-2 py-1 rounded text-xs', user.status==='active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800']">
+                      {{ user.status === 'active' ? '已激活' : '已禁用' }}
+                    </span>
+                  </td>
+                  <td class="px-6 py-4">{{ user.creator_name || '-' }}</td>
+                  <td class="px-6 py-4">{{ new Date(user.created_at).toLocaleString('zh-CN') }}</td>
+                  <td class="px-6 py-4">
+                    <button @click="toggleUserStatus(user)" class="text-blue-600 hover:text-blue-800 mr-2">
+                      {{ user.status === 'active' ? '禁用' : '激活' }}
+                    </button>
+                    <button @click="deleteUser(user)" class="text-red-600 hover:text-red-800">删除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script>
+    const { createApp, ref, reactive, computed } = Vue
+
+    createApp({
+      setup() {
+        const API_URL = 'http://localhost:8766/api/v1'
+        
+        const isAdmin = ref(false)
+        const admin = ref(null)
+        const token = ref('')
+        const currentView = ref('create')
+        const error = ref('')
+        
+        const loginForm = reactive({ username: '', password: '' })
+        const userForm = reactive({ username: '', password: '', email: '' })
+        
+        const usernameError = ref('')
+        const usernameSuccess = ref('')
+        const createSuccess = ref(null)
+        
+        const users = ref([])
+        
+        const passwordRules = computed(() => ({
+          length: userForm.password.length >= 8 && userForm.password.length <= 16,
+          upper: /[A-Z]/.test(userForm.password),
+          lower: /[a-z]/.test(userForm.password),
+          digit: /[0-9]/.test(userForm.password),
+          special: /[!@#$%^&*(),.?":{}|<>]/.test(userForm.password)
+        }))
+        
+        const passwordValid = computed(() => 
+          passwordRules.value.length && 
+          passwordRules.value.upper && 
+          passwordRules.value.lower && 
+          passwordRules.value.digit && 
+          passwordRules.value.special
+        )
+        
+        // 管理员登录
+        const adminLogin = async () => {
+          error.value = ''
+          try {
+            const res = await fetch(`${API_URL}/admin/login`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(loginForm)
+            })
+            const data = await res.json()
+            
+            if (!res.ok) throw new Error(data.detail)
+            
+            token.value = data.access_token
+            admin.value = { id: data.admin_id, username: data.username, role: data.role }
+            isAdmin.value = true
+            localStorage.setItem('adminToken', data.access_token)
+            localStorage.setItem('admin', JSON.stringify(admin.value))
+            
+            loadUsers()
+          } catch (e) {
+            error.value = e.message
+          }
+        }
+        
+        // 登出
+        const logout = () => {
+          isAdmin.value = false
+          admin.value = null
+          token.value = ''
+          localStorage.removeItem('adminToken')
+          localStorage.removeItem('admin')
+        }
+        
+        // 检查用户名
+        const checkUsername = async () => {
+          usernameError.value = ''
+          usernameSuccess.value = ''
+          
+          if (userForm.username.length < 6) return
+          
+          try {
+            const res = await fetch(`${API_URL}/admin/users/check-username/${userForm.username}`, {
+              headers: { 'Authorization': `Bearer ${token.value}` }
+            })
+            const data = await res.json()
+            
+            if (!data.available) {
+              usernameError.value = data.message
+            } else {
+              usernameSuccess.value = data.message
+            }
+          } catch (e) {
+            console.error(e)
+          }
+        }
+        
+        // 创建用户
+        const createUser = async () => {
+          createSuccess.value = null
+          
+          if (!passwordValid.value) {
+            error.value = '密码不符合要求'
+            return
+          }
+          
+          if (usernameError.value) {
+            error.value = '用户名已存在'
+            return
+          }
+          
+          try {
+            const res = await fetch(`${API_URL}/admin/users`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token.value}`
+              },
+              body: JSON.stringify(userForm)
+            })
+            const data = await res.json()
+            
+            if (!res.ok) throw new Error(data.detail)
+            
+            createSuccess.value = {
+              username: data.username,
+              password: data.temporary_password
+            }
+            
+            // 清空表单
+            userForm.username = ''
+            userForm.password = ''
+            userForm.email = ''
+            
+            loadUsers()
+          } catch (e) {
+            error.value = e.message
+          }
+        }
+        
+        // 加载用户列表
+        const loadUsers = async () => {
+          try {
+            const res = await fetch(`${API_URL}/admin/users`, {
+              headers: { 'Authorization': `Bearer ${token.value}` }
+            })
+            users.value = await res.json()
+          } catch (e) {
+            console.error(e)
+          }
+        }
+        
+        // 切换用户状态
+        const toggleUserStatus = async (user) => {
+          try {
+            const res = await fetch(`${API_URL}/admin/users/${user.id}/toggle-status`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token.value}` }
+            })
+            if (res.ok) {
+              loadUsers()
+            }
+          } catch (e) {
+            console.error(e)
+          }
+        }
+        
+        // 删除用户
+        const deleteUser = async (user) => {
+          if (!confirm(`确定要删除用户 "${user.username}" 吗？`)) return
+          
+          try {
+            const res = await fetch(`${API_URL}/admin/users/${user.id}`, {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${token.value}` }
+            })
+            if (res.ok) {
+              loadUsers()
+            }
+          } catch (e) {
+            console.error(e)
+          }
+        }
+        
+        // 初始化
+        const savedAdmin = localStorage.getItem('admin')
+        const savedToken = localStorage.getItem('adminToken')
+        if (savedAdmin && savedToken) {
+          admin.value = JSON.parse(savedAdmin)
+          token.value = savedToken
+          isAdmin.value = true
+          loadUsers()
+        }
+        
+        return {
+          isAdmin, admin, currentView, error,
+          loginForm, userForm,
+          usernameError, usernameSuccess, createSuccess,
+          users, passwordRules, passwordValid,
+          adminLogin, logout, checkUsername, createUser,
+          loadUsers, toggleUserStatus, deleteUser
+        }
+      }
+    }).mount('#app')
+  </script>
+</body>
+</html>
