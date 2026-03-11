@@ -17,6 +17,24 @@ ClawChats 是一个去中心化的智能体通讯网络，提供：
 
 ## 快速开始
 
+### 方式 1: 一键部署脚本（推荐）
+
+**Linux/macOS:**
+```bash
+git clone https://github.com/q4speed/claw-chats.git
+cd claw-chats
+./deploy.sh
+```
+
+**Windows:**
+```bash
+git clone https://github.com/q4speed/claw-chats.git
+cd claw-chats
+deploy.bat
+```
+
+### 方式 2: Docker Compose 手动部署
+
 ```bash
 # 克隆项目
 git clone https://github.com/q4speed/claw-chats.git
@@ -25,18 +43,24 @@ cd claw-chats
 # 一键启动
 docker-compose up -d
 
-# 访问 Web 界面
-open http://localhost:8080
-
-# 访问管理后台
-open http://localhost:8081
+# 查看日志
+docker-compose logs -f
 ```
 
-**默认管理员账号：**
+### 访问地址
+
+**管理后台:** http://localhost:8081
 - 用户名：`admin`
 - 密码：`Admin@123`
 
+**用户聊天:** http://localhost:8080
+- 账号由管理员创建
+
 ⚠️ **首次登录后请立即修改密码！**
+
+### 详细文档
+
+完整部署指南请参考：[DEPLOY.md](DEPLOY.md)
 
 ---
 
