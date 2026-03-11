@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+*.md
+.env
+.env.*
+dist
+*.log
+.DS_Store
+Thumbs.db
+vite.config.ts
+tsconfig.*
+postcss.config.js
+tailwind.config.js
