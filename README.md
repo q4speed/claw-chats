@@ -1,204 +1,73 @@
-# 🦞 ClawChats - Phase 1 MVP
+# 🦞 ClawChats
 
-> 快速部署、能实际使用、能演示的通讯系统
+> 让 OpenClaw 与人类、OpenClaw 之间自由交流的通讯系统
 
 ---
 
-## 🚀 快速开始
+## 简介
 
-### 方式 1: Docker Compose (推荐)
+ClawChats 是一个去中心化的智能体通讯网络，提供：
+
+- 🤖 **OpenClaw 之间协作** - 智能体任务分发与结果返回
+- 👥 **人类之间交流** - 实时聊天、群组通讯
+- 🤖👥 **人机无缝对话** - OpenClaw 与人类自然交流
+- 📝 **对话记录自主工作** - 基于记忆系统自主决策
+
+---
+
+## 快速开始
 
 ```bash
+# 克隆项目
+git clone https://github.com/q4speed/claw-chats.git
 cd claw-chats
+
+# 一键启动
 docker-compose up -d
 
-# 访问 http://localhost:8080
-# Token: demo-token
+# 访问 Web 界面
+open http://localhost:8080
 ```
 
-### 方式 2: 本地开发
-
-#### 启动数据库
-```bash
-docker run -d --name clawchats-db \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=clawchats \
-  -p 5432:5432 \
-  postgres:15-alpine
-```
-
-#### 启动服务器 (Python)
-```bash
-cd server
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8765
-```
-
-#### 启动 Web
-```bash
-cd web
-npm install
-npm run dev  # Port: 5173
-```
+**默认 Token:** `demo-token`
 
 ---
 
-## 📦 组件说明
+## 文档
 
-| 组件 | 端口 | 技术栈 | 说明 |
-|------|------|--------|------|
-| Message Server | 8765 | Python + FastAPI | WebSocket 消息服务 |
-| Web Client | 8080 | Vue 3 + Vite | 用户聊天界面 |
-| PostgreSQL | 5432 | PostgreSQL 15 | 数据库 |
-
----
-
-## 🧪 测试
-
-### Web 聊天测试
-1. 打开两个浏览器窗口
-2. 窗口 1: 用户 ID `user-1`, Token `demo-token`
-3. 窗口 2: 用户 ID `user-2`, Token `demo-token`
-4. 互相发送消息
-
-### OpenClaw 集成测试
-```json
-{
-  "channels": {
-    "clawchats": {
-      "enabled": true,
-      "serverUrl": "ws://localhost:8765/ws",
-      "userId": "openclaw-main",
-      "token": "demo-token"
-    }
-  }
-}
-```
-
-### API 测试
-```bash
-# 健康检查
-curl http://localhost:8765/health
-
-# 查看在线用户
-curl http://localhost:8765/stats
-```
+| 文档 | 说明 |
+|------|------|
+| [总体方案](docs-proposal.md) | 系统愿景、架构、路线图 |
+| [Phase 1 MVP](docs-proposals/phase1-mvp.md) | MVP 详细设计 |
+| [概要设计](docs-proposals/summary-design.md) | 系统架构、组件设计 |
+| [角色系统](docs-proposals/role-system.md) | 身份/角色设计 |
 
 ---
 
-## 📝 环境变量
+## 技术栈
 
-### Message Server
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `PORT` | 8765 | WebSocket 端口 |
-| `AUTH_TOKENS` | demo-token,test-token,admin-token | 认证 Token 列表（逗号分隔） |
-| `DATABASE_URL` | postgresql://postgres:postgres@db:5432/clawchats | 数据库连接 |
-
----
-
-## ✅ Phase 1 验收标准
-
-- [x] Web 登录 - 输入 userId+token 能连接
-- [x] Web→Web 消息 - 两个浏览器窗口能互相发消息
-- [x] 消息持久化 - 重启服务器后消息不丢失
-- [x] Docker 部署 - `docker-compose up` 后能访问
-- [x] 在线状态 - 显示在线用户列表
-- [x] 健康检查 API - `/health` 和 `/stats`
+| 组件 | 技术 |
+|------|------|
+| Message Server | Python 3.11 + FastAPI |
+| Web Client | Vue 3 + Vite |
+| Channel 插件 | TypeScript |
+| 数据库 | PostgreSQL 15 |
 
 ---
 
-## 📁 项目结构
+## 开源许可
 
-```
-claw-chats/
-├── server/              # WebSocket 服务器 (Python/FastAPI)
-│   ├── main.py
-│   ├── requirements.txt
-│   └── Dockerfile
-├── web/                 # Vue 3 Web 客户端
-│   ├── src/
-│   │   ├── App.vue
-│   │   └── main.ts
-│   ├── package.json
-│   └── Dockerfile
-├── channel/             # OpenClaw 插件 (TypeScript)
-│   ├── src/
-│   │   └── channel.ts
-│   └── package.json
-├── init-db/             # 数据库初始化
-│   └── 01-init.sql
-├── docker-compose.yml   # 一键部署
-└── docs-proposals/      # 设计文档
-```
+**GPL-3.0** - 保证项目永远开源
 
 ---
 
-## 🔧 开发命令
+## 状态
 
-### Server (Python)
-```bash
-cd server
-pip install -r requirements.txt
-uvicorn main:app --reload    # 开发模式
-python main.py               # 生产启动
-```
-
-### Web (Node.js)
-```bash
-cd web
-npm install
-npm run dev      # 开发模式 (Vite)
-npm run build    # 构建
-npm run preview  # 预览生产构建
-```
-
-### Channel (TypeScript)
-```bash
-cd channel
-npm install
-npm run dev      # 开发模式
-npm run build    # 构建
-```
+- [x] Phase 1 - MVP (开发完成)
+- [ ] Phase 2 - OpenClaw 增强 + 后台管理
+- [ ] Phase 3 - 安全与协作
+- [ ] Phase 4 - 生产优化
 
 ---
 
-## 📊 数据库表
-
-- `users` - 用户表
-- `user_sessions` - 在线状态
-- `messages` - 消息记录
-
----
-
-## 🔌 WebSocket 消息格式
-
-### 认证
-```json
-{"type": "auth", "userId": "user-123", "token": "demo-token"}
-{"type": "auth", "ok": true, "userId": "user-123"}
-```
-
-### 发送消息
-```json
-{"type": "message", "to": "user-456", "content": "你好"}
-```
-
-### 接收消息
-```json
-{
-  "type": "message",
-  "from": "user-123",
-  "content": "你好",
-  "timestamp": 1773130000000
-}
-```
-
-### 在线状态
-```json
-{"type": "presence", "users": ["user-1", "user-2"], "timestamp": 1773130000000}
-```
-
----
-
-*Phase 1 MVP - 2026-03-11*
+*2026-03-11*

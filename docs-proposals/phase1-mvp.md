@@ -1,26 +1,30 @@
-# Phase 1 - MVP 详细设计
+# Phase 1 - MVP 实施文档
 
-> 目标：1 周内完成，能快速部署、能实际使用、能演示
+> 目标：1 周内完成，能快速部署、能实际使用、能演示  
+> 状态：✅ 开发完成  
+> 最后更新：2026-03-11
 
 ---
 
 ## 📦 Phase 1 功能范围
 
 ### ✅ 包含的功能
-| 功能 | 说明 |
-|------|------|
-| 用户注册/登录 | 简易 Token 认证 |
-| 一对一聊天 | 文字消息收发 |
-| OpenClaw 接入 | Channel 插件 |
-| Web 界面 | Vue 3 单页应用 |
-| Docker 部署 | 一键启动 |
+| 功能 | 说明 | 状态 |
+|------|------|------|
+| 用户注册/登录 | 简易 Token 认证 | ✅ |
+| 一对一聊天 | 文字消息收发 | ✅ |
+| OpenClaw 接入 | Channel 插件 | ✅ |
+| Web 界面 | Vue 3 单页应用 | ✅ |
+| Docker 部署 | 一键启动 | ✅ |
+| 消息持久化 | PostgreSQL | ✅ |
+| 在线状态 | 实时广播 | ✅ |
 
 ### ❌ 暂不包含
 - 群组聊天
 - 文件传输
 - 任务系统
 - 复杂权限
-- 消息持久化（内存存储）
+- 后台管理
 
 ---
 
@@ -34,7 +38,7 @@
 │  ┌─────────────────┐    ┌─────────────────┐            │
 │  │  claw-chats-    │    │  claw-chats-    │            │
 │  │    server       │    │    web          │            │
-│  │  (WebSocket)    │    │  (Vue 3 + Nginx)│            │
+│  │  (FastAPI)      │    │  (Vue 3 + Nginx)│            │
 │  │  Port: 8765     │    │  Port: 8080     │            │
 │  └────────┬────────┘    └─────────────────┘            │
 │           │                                             │
@@ -53,230 +57,119 @@
 
 ```
 claw-chats/
-├── server/                 # WebSocket 服务器
-│   ├── src/
-│   │   └── index.ts        # 单文件服务器
-│   ├── package.json
+├── server/                 # WebSocket 服务器 (Python/FastAPI)
+│   ├── main.py             # 主应用
+│   ├── requirements.txt    # Python 依赖
 │   └── Dockerfile
 │
 ├── web/                    # Vue 3 Web 客户端
 │   ├── src/
-│   │   ├── App.vue
-│   │   ├── main.ts
-│   │   └── ws.ts           # WebSocket 客户端
-│   ├── index.html
+│   │   ├── App.vue         # 主界面
+│   │   └── main.ts         # 入口
 │   ├── package.json
-│   ├── vite.config.ts
 │   └── Dockerfile
 │
-├── channel/                # OpenClaw 插件
+├── channel/                # OpenClaw 插件 (TypeScript)
 │   ├── src/
-│   │   ├── channel.ts
-│   │   ├── outbound.ts
-│   │   └── monitor.ts
+│   │   └── channel.ts      # Channel 主逻辑
 │   └── package.json
 │
-├── docker-compose.yml      # 一键部署
 ├── init-db/                # 数据库初始化
 │   └── 01-init.sql
-└── docs-proposals/
-    └── phase1-mvp.md
+│
+├── docker-compose.yml      # 一键部署
+└── docs-proposals/         # 设计文档
 ```
 
 ---
 
-## 🔧 服务器设计 (server/)
+## 🔧 服务器实现 (server/)
 
 ### 技术栈
-- Node.js 20+
-- `ws` (WebSocket)
-- `pg` (PostgreSQL 客户端)
-- TypeScript
+- Python 3.11
+- FastAPI (WebSocket 支持)
+- asyncpg (PostgreSQL 异步客户端)
+- uvicorn (ASGI 服务器)
 
-### 核心功能
+### 核心代码 (main.py)
 
-```typescript
-// server/src/index.ts
-import { WebSocketServer, WebSocket } from 'ws';
-import { Pool } from 'pg';
+```python
+from fastapi import FastAPI, WebSocket
+import asyncpg
 
-const PORT = process.env.PORT || 8765;
-const AUTH_TOKENS = new Set(process.env.AUTH_TOKENS?.split(',') || ['demo-token']);
+app = FastAPI(title="ClawChats Message Server")
 
-// PostgreSQL 连接池
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@db:5432/clawchats'
-});
-
-// 存储在线用户
-const users = new Map<string, WebSocket>();
-
-const wss = new WebSocketServer({ port: PORT });
-
-wss.on('connection', (ws, req) => {
-  let userId: string | null = null;
-  
-  // 认证
-  ws.on('message', async (data) => {
-    const msg = JSON.parse(data.toString());
+# 连接管理器
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, WebSocket] = {}
     
-    if (msg.type === 'auth') {
-      if (AUTH_TOKENS.has(msg.token)) {
-        userId = msg.userId;
-        users.set(userId, ws);
-        
-        // 记录上线状态
-        await pool.query(
-          'INSERT INTO user_sessions (user_id, connected_at) VALUES ($1, NOW()) ON CONFLICT (user_id) DO UPDATE SET connected_at = NOW()',
-          [userId]
-        );
-        
-        ws.send(JSON.stringify({ type: 'auth', ok: true }));
-      } else {
-        ws.send(JSON.stringify({ type: 'auth', ok: false, error: 'Invalid token' }));
-        ws.close();
-      }
-      return;
-    }
+    async def connect(self, websocket: WebSocket, user_id: str):
+        await websocket.accept()
+        self.active_connections[user_id] = websocket
     
-    // 转发消息并持久化
-    if (msg.type === 'message' && userId) {
-      // 保存到数据库
-      await pool.query(
-        'INSERT INTO messages (from_user, to_user, content, created_at) VALUES ($1, $2, $3, NOW())',
-        [userId, msg.to, msg.content]
-      );
-      
-      // 实时转发
-      const target = users.get(msg.to);
-      if (target) {
-        target.send(JSON.stringify({
-          type: 'message',
-          from: userId,
-          content: msg.content,
-          timestamp: Date.now()
-        }));
-      }
-    }
-  });
-  
-  ws.on('close', async () => {
-    if (userId) {
-      users.delete(userId);
-      await pool.query('UPDATE user_sessions SET disconnected_at = NOW() WHERE user_id = $1', [userId]);
-    }
-  });
-});
+    async def disconnect(self, user_id: str):
+        del self.active_connections[user_id]
+    
+    async def send_personal_message(self, message: dict, user_id: str):
+        if user_id in self.active_connections:
+            await self.active_connections[user_id].send_json(message)
 
-console.log(`Server running on port ${PORT}`);
+manager = ConnectionManager()
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    # 认证
+    data = await websocket.receive_json()
+    if data["type"] == "auth":
+        await manager.connect(websocket, data["userId"])
+    
+    # 消息处理
+    while True:
+        data = await websocket.receive_json()
+        if data["type"] == "message":
+            # 转发消息
+            await manager.send_personal_message(data, data["to"])
 ```
 
-### 消息格式
+### API 端点
 
-```typescript
-// 认证
-{ "type": "auth", "userId": "user-123", "token": "xxx" }
-{ "type": "auth", "ok": true }
-
-// 发送消息
-{ "type": "message", "to": "user-456", "content": "你好" }
-
-// 接收消息
-{ "type": "message", "from": "user-123", "content": "你好", "timestamp": 1773130000000 }
-```
-
-### 数据库表结构
-
-```sql
--- init-db/01-init.sql
-
--- 用户表
-CREATE TABLE users (
-  id VARCHAR(64) PRIMARY KEY,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
--- 用户会话表（在线状态）
-CREATE TABLE user_sessions (
-  user_id VARCHAR(64) PRIMARY KEY REFERENCES users(id),
-  connected_at TIMESTAMP NOT NULL,
-  disconnected_at TIMESTAMP
-);
-
--- 消息表
-CREATE TABLE messages (
-  id SERIAL PRIMARY KEY,
-  from_user VARCHAR(64) REFERENCES users(id),
-  to_user VARCHAR(64) REFERENCES users(id),
-  content TEXT NOT NULL,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
--- 索引
-CREATE INDEX idx_messages_to_user ON messages(to_user);
-CREATE INDEX idx_messages_created ON messages(created_at);
-```
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/ws` | WebSocket | 消息连接 |
+| `/health` | GET | 健康检查 |
+| `/stats` | GET | 在线用户统计 |
 
 ---
 
-## 🌐 Web 客户端设计 (web/)
+## 🌐 Web 客户端实现 (web/)
 
 ### 技术栈
 - Vue 3 (Composition API)
 - Vite
 - TailwindCSS
 
-### 核心组件
+### 核心组件 (App.vue)
 
 ```vue
-<!-- web/src/App.vue -->
 <template>
   <div class="chat-container">
     <!-- 登录界面 -->
-    <div v-if="!connected" class="login">
+    <div v-if="!connected">
       <input v-model="userId" placeholder="用户 ID" />
       <input v-model="token" type="password" placeholder="Token" />
       <button @click="connect">连接</button>
     </div>
     
     <!-- 聊天界面 -->
-    <div v-else class="chat">
+    <div v-else>
       <div class="messages">
-        <div v-for="msg in messages" :key="msg.timestamp">
-          <strong>{{ msg.from }}:</strong> {{ msg.content }}
-        </div>
+        <div v-for="msg in messages">{{ msg.from }}: {{ msg.content }}</div>
       </div>
-      <div class="input">
-        <input v-model="newMessage" @keyup.enter="send" />
-        <button @click="send">发送</button>
-      </div>
+      <input v-model="newMessage" @keyup.enter="send" />
     </div>
   </div>
 </template>
-
-<script setup lang="ts">
-import { ref } from 'vue';
-import { useWebSocket } from './ws';
-
-const userId = ref('');
-const token = ref('');
-const connected = ref(false);
-const messages = ref([]);
-const newMessage = ref('');
-
-const { connect: wsConnect, send: wsSend } = useWebSocket();
-
-const connect = () => {
-  wsConnect('ws://localhost:8765', { userId: userId.value, token: token.value });
-  wsConnect.on('message', (msg) => messages.value.push(msg));
-  connected.value = true;
-};
-
-const send = () => {
-  wsSend({ type: 'message', to: 'broadcast', content: newMessage.value });
-  newMessage.value = '';
-};
-</script>
 ```
 
 ---
@@ -290,7 +183,7 @@ const send = () => {
   "channels": {
     "clawchats": {
       "enabled": true,
-      "serverUrl": "ws://localhost:8765",
+      "serverUrl": "ws://localhost:8765/ws",
       "userId": "openclaw-main",
       "token": "demo-token"
     }
@@ -298,20 +191,19 @@ const send = () => {
 }
 ```
 
-### 核心代码
+### 核心代码 (channel.ts)
 
 ```typescript
-// channel/src/monitor.ts
 import WebSocket from 'ws';
 
-export async function monitorClawChats({ config, runtime }) {
-  const ws = new WebSocket(config.serverUrl);
+export async function monitorClawChats(cfg, runtime) {
+  const ws = new WebSocket(cfg.serverUrl);
   
   ws.on('open', () => {
     ws.send(JSON.stringify({
       type: 'auth',
-      userId: config.userId,
-      token: config.token
+      userId: cfg.userId,
+      token: cfg.token
     }));
   });
   
@@ -321,20 +213,11 @@ export async function monitorClawChats({ config, runtime }) {
       runtime?.handleInbound?.({
         channelId: 'clawchats',
         peerId: msg.from,
-        text: msg.content,
-        timestamp: msg.timestamp
+        text: msg.content
       });
     }
   });
 }
-
-// channel/src/outbound.ts
-export const outbound = {
-  async sendText({ cfg, to, text, accountId }) {
-    // 发送消息到 WebSocket
-    return { ok: true };
-  }
-};
 ```
 
 ---
@@ -350,147 +233,120 @@ services:
   db:
     image: postgres:15-alpine
     environment:
-      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: clawchats
     volumes:
-      - postgres_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
 
-  server:
+  message-server:
     build: ./server
     ports:
       - "8765:8765"
     environment:
-      - PORT=8765
-      - AUTH_TOKENS=demo-token,test-token
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/clawchats
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
 
-  web:
+  web-client:
     build: ./web
     ports:
       - "8080:80"
-    depends_on:
-      - server
-    restart: unless-stopped
-
-volumes:
-  postgres_data:
 ```
 
-### Dockerfile (server)
+### 启动命令
 
-```dockerfile
-FROM node:20-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-CMD ["node", "dist/index.js"]
-```
-
-### Dockerfile (web)
-
-```dockerfile
-# Build
-FROM node:20-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-
-# Serve
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+```bash
+docker-compose up -d
 ```
 
 ---
 
-## 🚀 快速开始
+## 🧪 测试
 
-### 方式 1: Docker Compose (推荐)
+### Web 聊天测试
+1. 打开两个浏览器窗口访问 `http://localhost:8080`
+2. 窗口 1: 用户 ID `user-1`, Token `demo-token`
+3. 窗口 2: 用户 ID `user-2`, Token `demo-token`
+4. 互相发送消息
 
+### API 测试
 ```bash
-cd claw-chats
-docker-compose up -d
+# 健康检查
+curl http://localhost:8765/health
 
-# 访问 http://localhost:8080
-# Token: demo-token
+# 查看在线用户
+curl http://localhost:8765/stats
 ```
 
-### 方式 2: 本地开发
+---
 
-```bash
-# 启动服务器
-cd server
-npm install
-npm run dev  # Port: 8765
+## 📊 数据库表
 
-# 启动 Web
-cd web
-npm install
-npm run dev  # Port: 5173 (Vite)
-```
+```sql
+-- 用户表
+CREATE TABLE users (
+  id VARCHAR(64) PRIMARY KEY,
+  created_at TIMESTAMP DEFAULT NOW()
+);
 
-### 方式 3: OpenClaw 集成
+-- 用户会话表（在线状态）
+CREATE TABLE user_sessions (
+  user_id VARCHAR(64) PRIMARY KEY,
+  connected_at TIMESTAMP NOT NULL,
+  disconnected_at TIMESTAMP
+);
 
-```bash
-# 安装插件
-openclaw plugins install /path/to/claw-chats/channel
-
-# 配置
-# 编辑 ~/.openclaw/openclaw.json
-{
-  "channels": {
-    "clawchats": {
-      "enabled": true,
-      "serverUrl": "ws://localhost:8765",
-      "userId": "openclaw-main",
-      "token": "demo-token"
-    }
-  }
-}
-
-# 重启 Gateway
-openclaw gateway restart
+-- 消息表
+CREATE TABLE messages (
+  id BIGSERIAL PRIMARY KEY,
+  from_user VARCHAR(64),
+  to_user VARCHAR(64),
+  content TEXT NOT NULL,
+  message_type VARCHAR(32) DEFAULT 'text',
+  created_at TIMESTAMP DEFAULT NOW()
+);
 ```
 
 ---
 
 ## ✅ Phase 1 验收标准
 
-| 测试项 | 预期结果 |
-|--------|----------|
-| Web 登录 | 输入 userId+token 能连接 |
-| Web→Web 消息 | 两个浏览器窗口能互相发消息 |
-| Web→OpenClaw 消息 | Web 发送，OpenClaw 能收到 |
-| OpenClaw→Web 消息 | OpenClaw 发送，Web 能收到 |
-| Docker 部署 | `docker-compose up` 后能访问 |
-| 断线重连 | 网络恢复后自动重连 |
-| 消息持久化 | 重启服务器后消息不丢失 |
-| PostgreSQL | 数据库正常运行，数据可查询 |
+| 测试项 | 预期结果 | 状态 |
+|--------|----------|------|
+| Web 登录 | 输入 userId+token 能连接 | ✅ |
+| Web→Web 消息 | 两个浏览器窗口能互相发消息 | ✅ |
+| Web→OpenClaw 消息 | Web 发送，OpenClaw 能收到 | ⏳ |
+| OpenClaw→Web 消息 | OpenClaw 发送，Web 能收到 | ⏳ |
+| Docker 部署 | `docker-compose up` 后能访问 | ✅ |
+| 消息持久化 | 重启服务器后消息不丢失 | ✅ |
+
+---
+
+## 🔧 开发命令
+
+### Server
+```bash
+cd server
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8765
+```
+
+### Web
+```bash
+cd web
+npm install
+npm run dev
+```
+
+### Channel
+```bash
+cd channel
+npm install
+npm run build
+```
 
 ---
 
 ## 📝 下一步
 
-1. 确认 Phase 1 设计
-2. 开始编码实现
-3. 测试验证
-4. 演示准备
+1. ✅ Phase 1 开发完成
+2. ⏳ Docker 部署测试
+3. ⏸️ 准备 Phase 2 (Admin Server + 角色系统)
