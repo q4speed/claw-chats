@@ -22,7 +22,7 @@ services:
     networks:
       - clawchats-network
 
-  # Message Server (WebSocket)
+  # Message Server (WebSocket) - Python/FastAPI
   message-server:
     build: ./server
     container_name: clawchats-server

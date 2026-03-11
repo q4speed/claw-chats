@@ -27,11 +27,11 @@ docker run -d --name clawchats-db \
   postgres:15-alpine
 ```
 
-#### 启动服务器
+#### 启动服务器 (Python)
 ```bash
 cd server
-npm install
-npm run dev  # Port: 8765
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8765
 ```
 
 #### 启动 Web
@@ -45,11 +45,11 @@ npm run dev  # Port: 5173
 
 ## 📦 组件说明
 
-| 组件 | 端口 | 说明 |
-|------|------|------|
-| Message Server | 8765 | WebSocket 消息服务 |
-| Web Client | 8080 | 用户聊天界面 |
-| PostgreSQL | 5432 | 数据库 |
+| 组件 | 端口 | 技术栈 | 说明 |
+|------|------|--------|------|
+| Message Server | 8765 | Python + FastAPI | WebSocket 消息服务 |
+| Web Client | 8080 | Vue 3 + Vite | 用户聊天界面 |
+| PostgreSQL | 5432 | PostgreSQL 15 | 数据库 |
 
 ---
 
@@ -67,12 +67,21 @@ npm run dev  # Port: 5173
   "channels": {
     "clawchats": {
       "enabled": true,
-      "serverUrl": "ws://localhost:8765",
+      "serverUrl": "ws://localhost:8765/ws",
       "userId": "openclaw-main",
       "token": "demo-token"
     }
   }
 }
+```
+
+### API 测试
+```bash
+# 健康检查
+curl http://localhost:8765/health
+
+# 查看在线用户
+curl http://localhost:8765/stats
 ```
 
 ---
@@ -83,7 +92,7 @@ npm run dev  # Port: 5173
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `PORT` | 8765 | WebSocket 端口 |
-| `AUTH_TOKENS` | demo-token,test-token | 认证 Token 列表（逗号分隔） |
+| `AUTH_TOKENS` | demo-token,test-token,admin-token | 认证 Token 列表（逗号分隔） |
 | `DATABASE_URL` | postgresql://postgres:postgres@db:5432/clawchats | 数据库连接 |
 
 ---
@@ -95,6 +104,7 @@ npm run dev  # Port: 5173
 - [x] 消息持久化 - 重启服务器后消息不丢失
 - [x] Docker 部署 - `docker-compose up` 后能访问
 - [x] 在线状态 - 显示在线用户列表
+- [x] 健康检查 API - `/health` 和 `/stats`
 
 ---
 
@@ -102,10 +112,9 @@ npm run dev  # Port: 5173
 
 ```
 claw-chats/
-├── server/              # WebSocket 服务器
-│   ├── src/
-│   │   └── index.ts
-│   ├── package.json
+├── server/              # WebSocket 服务器 (Python/FastAPI)
+│   ├── main.py
+│   ├── requirements.txt
 │   └── Dockerfile
 ├── web/                 # Vue 3 Web 客户端
 │   ├── src/
@@ -113,7 +122,7 @@ claw-chats/
 │   │   └── main.ts
 │   ├── package.json
 │   └── Dockerfile
-├── channel/             # OpenClaw 插件
+├── channel/             # OpenClaw 插件 (TypeScript)
 │   ├── src/
 │   │   └── channel.ts
 │   └── package.json
@@ -127,16 +136,15 @@ claw-chats/
 
 ## 🔧 开发命令
 
-### Server
+### Server (Python)
 ```bash
 cd server
-npm install
-npm run dev      # 开发模式
-npm run build    # 构建
-npm run start    # 生产启动
+pip install -r requirements.txt
+uvicorn main:app --reload    # 开发模式
+python main.py               # 生产启动
 ```
 
-### Web
+### Web (Node.js)
 ```bash
 cd web
 npm install
@@ -145,7 +153,7 @@ npm run build    # 构建
 npm run preview  # 预览生产构建
 ```
 
-### Channel
+### Channel (TypeScript)
 ```bash
 cd channel
 npm install
@@ -160,6 +168,36 @@ npm run build    # 构建
 - `users` - 用户表
 - `user_sessions` - 在线状态
 - `messages` - 消息记录
+
+---
+
+## 🔌 WebSocket 消息格式
+
+### 认证
+```json
+{"type": "auth", "userId": "user-123", "token": "demo-token"}
+{"type": "auth", "ok": true, "userId": "user-123"}
+```
+
+### 发送消息
+```json
+{"type": "message", "to": "user-456", "content": "你好"}
+```
+
+### 接收消息
+```json
+{
+  "type": "message",
+  "from": "user-123",
+  "content": "你好",
+  "timestamp": 1773130000000
+}
+```
+
+### 在线状态
+```json
+{"type": "presence", "users": ["user-1", "user-2"], "timestamp": 1773130000000}
+```
 
 ---
 
