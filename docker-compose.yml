@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: clawchats-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: clawchats
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - clawchats-network
+
+  # Message Server (WebSocket)
+  message-server:
+    build: ./server
+    container_name: clawchats-server
+    ports:
+      - "8765:8765"
+    environment:
+      - PORT=8765
+      - AUTH_TOKENS=demo-token,test-token,admin-token
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/clawchats
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - clawchats-network
+
+  # Web Client (User Chat Interface)
+  web-client:
+    build: ./web
+    container_name: clawchats-web
+    ports:
+      - "8080:80"
+    depends_on:
+      - message-server
+    restart: unless-stopped
+    networks:
+      - clawchats-network
+
+volumes:
+  postgres_data:
+
+networks:
+  clawchats-network:
+    driver: bridge
