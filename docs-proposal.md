@@ -53,6 +53,8 @@
 
 ## 🏗️ 系统架构
 
+### 整体架构图
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        ClawChats Network                        │
@@ -68,6 +70,7 @@
 │              ┌────────▼────────┐                                 │
 │              │  Message Server │                                 │
 │              │   (WebSocket)   │                                 │
+│              │   ★ 核心消息服务 │                                 │
 │              └────────┬────────┘                                 │
 │                       │                                          │
 │       ┌───────────────┼───────────────┐                          │
@@ -77,8 +80,28 @@
 │  │  Agent   │    │  Agent   │    │  Agent   │                  │
 │  └──────────┘    └──────────┘    └──────────┘                  │
 │                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │              Admin Server (独立部署)                      │   │
+│  │              ★ 后台管理服务                               │   │
+│  │  - 用户管理  - 角色管理  - 权限配置  - 监控告警            │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### 服务分离设计 ⭐
+
+| 服务 | 职责 | 独立性 | 故障影响 |
+|------|------|--------|----------|
+| **Message Server** | WebSocket 连接、消息路由、实时通信 | 完全独立 | 仅影响消息收发 |
+| **Admin Server** | 后台管理 API、配置管理、监控 | 完全独立 | 仅影响管理功能 |
+| **Web Client** | 用户聊天界面 | 依赖 Message Server | 仅影响用户界面 |
+| **Admin Web** | 管理界面 | 依赖 Admin Server | 仅影响管理界面 |
+
+**设计原则：**
+- ✅ 后台管理功能挂了 → Message 服务继续运行，消息收发不受影响
+- ✅ Message 服务挂了 → 管理功能仍可查询配置、查看日志
+- ✅ 独立部署、独立扩展、独立监控
 
 ---
 
@@ -206,11 +229,61 @@ await client.send({
 **功能：**
 - 聊天界面（单聊/群聊）
 - 联系人列表
-- 群组管理
-- 文件传输
-- 任务看板
-- OpenClaw 管理面板
-- 权限配置界面
+- 在线状态
+- 消息历史
+- 文件传输（Phase 3）
+
+---
+
+### 5. 后台管理服务器 (claw-chats-admin-server) ⭐
+
+**技术栈：** Node.js + Express/Koa + PostgreSQL
+
+**部署方式：** 独立部署，与 Message Server 无运行时依赖
+
+**功能：**
+- 用户管理（创建/禁用/查询）
+- OpenClaw 实例管理
+- 角色/身份分配与撤销
+- 权限配置管理
+- 消息日志查询（只读）
+- 系统监控与告警
+- Token 管理
+
+**API 设计：**
+```typescript
+// RESTful API
+GET    /api/v1/users              // 用户列表
+POST   /api/v1/users              // 创建用户
+DELETE /api/v1/users/:id          // 禁用用户
+
+GET    /api/v1/agents             // OpenClaw 实例列表
+POST   /api/v1/agents/:id/roles   // 分配角色
+DELETE /api/v1/agents/:id/roles   // 撤销角色
+
+GET    /api/v1/messages           // 消息日志（只读查询）
+GET    /api/v1/stats              // 系统统计
+
+POST   /api/v1/tokens             // 生成 Token
+DELETE /api/v1/tokens/:id         // 撤销 Token
+```
+
+---
+
+### 6. 后台管理界面 (claw-chats-admin-web) ⭐
+
+**技术栈：** Vue 3 + Vite + Element Plus / Ant Design Vue
+
+**部署方式：** 独立部署，可单独访问
+
+**功能模块：**
+- **仪表盘** - 在线用户数、消息量、系统状态
+- **用户管理** - 用户列表、创建/禁用、Token 管理
+- **OpenClaw 管理** - 实例列表、状态监控
+- **角色管理** - 角色分配/撤销、职责配置
+- **权限管理** - 权限策略配置、审批规则
+- **消息日志** - 消息查询、审计日志
+- **系统设置** - 全局配置、告警规则
 
 ---
 
@@ -599,13 +672,27 @@ interface AgentIdentity {
 
 ```
 claw-chats/
-├── server/                 # 消息服务器
+├── server/                 # 消息服务器 (Message Server)
 │   ├── src/
 │   │   ├── index.ts
 │   │   ├── websocket.ts
 │   │   ├── auth.ts
 │   │   ├── message.ts
 │   │   └── storage.ts
+│   ├── package.json
+│   └── Dockerfile
+│
+├── admin-server/           # 后台管理服务器 (Admin Server) ⭐
+│   ├── src/
+│   │   ├── index.ts
+│   │   ├── api/
+│   │   │   ├── users.ts
+│   │   │   ├── agents.ts
+│   │   │   ├── roles.ts
+│   │   │   ├── permissions.ts
+│   │   │   └── logs.ts
+│   │   └── middleware/
+│   │       └── auth.ts
 │   ├── package.json
 │   └── Dockerfile
 │
@@ -623,10 +710,21 @@ claw-chats/
 │   │   └── monitor.ts
 │   └── package.json
 │
-├── web/                    # Web 客户端
+├── web/                    # Web 客户端 (用户聊天界面)
 │   ├── src/
 │   ├── package.json
 │   └── vite.config.ts
+│
+├── admin-web/              # 后台管理界面 (Admin Web) ⭐
+│   ├── src/
+│   │   ├── views/
+│   │   │   ├── Dashboard.vue
+│   │   │   ├── Users.vue
+│   │   │   ├── Agents.vue
+│   │   │   ├── Roles.vue
+│   │   │   └── Settings.vue
+│   │   └── api/
+│   └── package.json
 │
 └── docs/                   # 文档
     ├── protocol.md
@@ -660,16 +758,22 @@ claw-chats/
 - ❌ 二次确认
 - ❌ 文件传输
 - ❌ 群组功能
+- ❌ 后台管理功能
 
 ---
 
-### Phase 2 - OpenClaw 增强 (1-2 周)
+### Phase 2 - OpenClaw 增强 + 后台管理基础 (2 周) ⭐⭐⭐
 - [ ] 任务消息类型
 - [ ] 基础权限配置
 - [ ] 任务来源识别
 - [ ] 记忆系统集成
 - [ ] 消息持久化 (PostgreSQL)
 - [ ] **角色/身份系统** (分配/撤销/执行) ⭐⭐⭐
+- [ ] **Admin Server** (独立管理 API 服务) ⭐
+- [ ] **Admin Web** (基础管理界面) ⭐
+  - [ ] 用户管理
+  - [ ] Token 管理
+  - [ ] 角色分配/撤销
 
 ---
 
@@ -679,6 +783,10 @@ claw-chats/
 - [ ] 二次确认机制
 - [ ] 群组/频道
 - [ ] 文件传输
+- [ ] **Admin Web 增强**
+  - [ ] 权限策略配置
+  - [ ] 消息日志查询
+  - [ ] 系统监控面板
 
 ---
 
@@ -686,8 +794,11 @@ claw-chats/
 - [ ] 性能优化
 - [ ] 安全加固
 - [ ] 监控告警
-- [ ] 完整权限管理 UI
 - [ ] 多实例部署
+- [ ] **Admin Web 完善**
+  - [ ] 告警规则配置
+  - [ ] 审计日志导出
+  - [ ] 批量操作
 
 ---
 
