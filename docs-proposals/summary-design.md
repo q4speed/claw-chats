@@ -124,79 +124,54 @@
 - 消息路由与转发
 - 消息持久化
 - 在线状态管理
+- 健康检查 API
 
 #### 3.1.2 技术栈
-- Node.js 20+
-- `ws` (WebSocket 库)
-- `pg` (PostgreSQL 客户端)
-- TypeScript
+- Python 3.11+
+- FastAPI (WebSocket 支持)
+- `asyncpg` (PostgreSQL 异步客户端)
+- `uvicorn` (ASGI 服务器)
 
 #### 3.1.3 核心模块
 
 ```
 server/
-├── src/
-│   ├── index.ts          # 入口
-│   ├── websocket.ts      # WebSocket 连接管理
-│   ├── auth.ts           # 认证中间件
-│   ├── message.ts        # 消息路由
-│   ├── presence.ts       # 在线状态
-│   └── storage.ts        # 数据持久化
+├── main.py               # 主应用 (FastAPI + WebSocket)
+├── requirements.txt      # Python 依赖
+└── Dockerfile            # 容器化部署
 ```
 
 #### 3.1.4 WebSocket 消息格式
 
-```typescript
+```json
 // 认证消息
-interface AuthMessage {
-  type: 'auth';
-  userId: string;
-  token: string;
-  agentId?: string;
-}
+{"type": "auth", "userId": "user-123", "token": "xxx", "agentId": "agent-xxx"}
+{"type": "auth", "ok": true, "userId": "user-123"}
 
 // 普通消息
-interface ChatMessage {
-  type: 'message';
-  to: string;
-  content: string;
-  metadata?: {
-    priority?: 'low' | 'normal' | 'high';
-    requiresAck?: boolean;
-  };
-}
+{"type": "message", "to": "user-456", "content": "你好", "metadata": {}}
 
-// 任务消息
-interface TaskMessage {
-  type: 'task';
-  to: string;
-  payload: {
-    taskId: string;
-    action: 'create' | 'update' | 'complete';
-    title: string;
-    description: string;
-    priority: 'low' | 'normal' | 'high';
-    deadline?: number;
-  };
-}
+// 接收消息
+{"type": "message", "from": "user-123", "content": "你好", "timestamp": 1773130000000}
 
-// 角色消息
-interface RoleMessage {
-  type: 'role_assignment';
-  payload: {
-    action: 'assign' | 'revoke' | 'update';
-    role: {
-      name: string;
-      description: string;
-      permissions: string[];
-    };
-  };
-}
+// 在线状态
+{"type": "presence", "users": ["user-1", "user-2"], "timestamp": 1773130000000}
+
+// 心跳
+{"type": "ping"} → {"type": "pong", "timestamp": 1773130000000}
 ```
+
+#### 3.1.5 HTTP API 端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/health` | GET | 健康检查 |
+| `/stats` | GET | 在线用户统计 |
+| `/ws` | WebSocket | 消息连接端点 |
 
 ---
 
-### 3.2 Admin Server (后台管理服务器)
+### 3.2 Admin Server (后台管理服务器) - Phase 2
 
 #### 3.2.1 职责
 - 用户管理 API
@@ -208,60 +183,41 @@ interface RoleMessage {
 - 系统监控
 
 #### 3.2.2 技术栈
-- Node.js 20+
-- Express / Koa
-- `pg` (PostgreSQL 客户端)
-- TypeScript
+- Python 3.11+
+- FastAPI
+- `asyncpg` (PostgreSQL 异步客户端)
+- `uvicorn` (ASGI 服务器)
 
 #### 3.2.3 核心模块
 
 ```
 admin-server/
-├── src/
-│   ├── index.ts              # 入口
-│   ├── api/
-│   │   ├── users.ts          # 用户管理
-│   │   ├── agents.ts         # OpenClaw 管理
-│   │   ├── roles.ts          # 角色管理
-│   │   ├── permissions.ts    # 权限管理
-│   │   ├── tokens.ts         # Token 管理
-│   │   └── logs.ts           # 日志查询
-│   ├── middleware/
-│   │   └── auth.ts           # API 认证
-│   └── services/
-│       ├── userService.ts
-│       ├── roleService.ts
-│       └── auditService.ts
+├── main.py               # 主应用 (FastAPI)
+├── api/                  # API 路由
+│   ├── users.py          # 用户管理
+│   ├── agents.py         # OpenClaw 管理
+│   ├── roles.py          # 角色管理
+│   ├── tokens.py         # Token 管理
+│   └── logs.py           # 日志查询
+├── models/               # 数据模型
+├── services/             # 业务逻辑
+│   ├── user_service.py
+│   ├── role_service.py
+│   └── audit_service.py
+├── requirements.txt      # Python 依赖
+└── Dockerfile            # 容器化部署
 ```
 
 #### 3.2.4 API 设计
 
-```typescript
-// 用户管理
-GET    /api/v1/users              // 用户列表
-POST   /api/v1/users              // 创建用户
-GET    /api/v1/users/:id          // 用户详情
-DELETE /api/v1/users/:id          // 禁用用户
-PUT    /api/v1/users/:id/status   // 更新状态
-
-// Token 管理
-POST   /api/v1/tokens             // 生成 Token
-GET    /api/v1/tokens             // Token 列表
-DELETE /api/v1/tokens/:id         // 撤销 Token
-
-// 角色管理
-GET    /api/v1/agents/:id/roles   // 查询角色
-POST   /api/v1/agents/:id/roles   // 分配角色
-DELETE /api/v1/agents/:id/roles   // 撤销角色
-
-// 消息日志（只读）
-GET    /api/v1/messages           // 消息列表
-GET    /api/v1/messages/:id       // 消息详情
-
-// 系统统计
-GET    /api/v1/stats/overview     // 概览统计
-GET    /api/v1/stats/usage        // 使用统计
-```
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/users` | GET/POST | 用户列表/创建 |
+| `/api/v1/users/:id` | GET/DELETE | 用户详情/禁用 |
+| `/api/v1/tokens` | GET/POST/DELETE | Token 管理 |
+| `/api/v1/agents/:id/roles` | GET/POST/DELETE | 角色管理 |
+| `/api/v1/messages` | GET | 消息日志查询 |
+| `/api/v1/stats/overview` | GET | 系统统计 |
 
 ---
 
@@ -379,7 +335,7 @@ channel/
 
 ---
 
-### 3.6 Client SDK
+### 3.6 Client SDK - Phase 2
 
 #### 3.6.1 职责
 - WebSocket 连接封装
@@ -387,28 +343,28 @@ channel/
 - 消息收发 API
 - 事件订阅
 
-#### 3.6.2 使用示例
+#### 3.6.2 技术栈
+- Python (优先)
+- TypeScript (可选)
 
-```typescript
-import { ClawChatsClient } from '@claw-chats/sdk';
+#### 3.6.3 使用示例 (Python)
 
-const client = new ClawChatsClient({
-  serverUrl: 'wss://chat.example.com/ws',
-  userId: 'user-123',
-  token: 'xxx'
-});
+```python
+from claw_chats import ClawChatsClient
 
-// 监听消息
-client.on('message', (msg) => {
-  console.log(`收到消息：${msg.content}`);
-});
+client = ClawChatsClient(
+    server_url='ws://localhost:8765/ws',
+    user_id='user-123',
+    token='xxx'
+)
 
-// 发送消息
-await client.send({
-  to: 'agent-456',
-  content: '请帮我分析这个文件',
-  type: 'task'
-});
+# 监听消息
+@client.on('message')
+def handle_message(msg):
+    print(f"收到消息：{msg['content']}")
+
+# 发送消息
+await client.send(to='agent-456', content='请帮我分析这个文件')
 ```
 
 ---
@@ -542,13 +498,14 @@ services:
       timeout: 5s
       retries: 5
 
-  # 核心消息服务
+  # 核心消息服务 (Python/FastAPI)
   message-server:
     build: ./server
     ports:
       - "8765:8765"
     environment:
       - PORT=8765
+      - AUTH_TOKENS=demo-token,test-token,admin-token
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/clawchats
     depends_on:
       db:
@@ -666,5 +623,16 @@ volumes:
 ### 8.2 参考文档
 
 - [总体设计](../docs-proposal.md)
-- [Phase 1 MVP 设计](./phase1-mvp.md)
+- [Phase 1 MVP 实现](../../README.md)
 - [角色系统设计](./role-system.md)
+
+### 8.3 技术栈总结
+
+| 组件 | 技术栈 |
+|------|--------|
+| Message Server | Python 3.11 + FastAPI + asyncpg |
+| Admin Server | Python 3.11 + FastAPI + asyncpg |
+| Web Client | Vue 3 + Vite + TailwindCSS |
+| Channel 插件 | TypeScript + ws |
+| 数据库 | PostgreSQL 15 |
+| 部署 | Docker + Docker Compose |
