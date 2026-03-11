@@ -205,14 +205,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 
 const API_URL = 'http://localhost:8766/api/v1'
+const WS_URL = 'ws://localhost:8765/ws'
 
 // 认证状态
 const currentUser = ref<any>(null)
 const token = ref('')
 const showLogin = ref(true)
+
+// WebSocket
+const ws = ref<WebSocket | null>(null)
 
 // 表单
 const loginForm = reactive({ username: '', password: '' })
@@ -227,6 +231,70 @@ const selectedGroup = ref<any>(null)
 const groupMessages = ref<any[]>([])
 const newMessage = ref('')
 const showCreateGroup = ref(false)
+
+// 连接 WebSocket
+const connectWebSocket = () => {
+  if (ws.value) ws.value.close()
+  
+  ws.value = new WebSocket(WS_URL)
+  
+  ws.value.onopen = () => {
+    console.log('[WS] Connected')
+    // 认证
+    ws.value?.send(JSON.stringify({
+      type: 'auth',
+      userId: currentUser.value.id,
+      token: 'demo-token' // TODO: 使用真实 token
+    }))
+  }
+  
+  ws.value.onmessage = (event) => {
+    const msg = JSON.parse(event.data)
+    handleWebSocketMessage(msg)
+  }
+  
+  ws.value.onerror = (e) => {
+    console.error('[WS] Error', e)
+  }
+  
+  ws.value.onclose = () => {
+    console.log('[WS] Disconnected')
+    // 尝试重连
+    setTimeout(() => {
+      if (currentUser.value) connectWebSocket()
+    }, 3000)
+  }
+}
+
+// 处理 WebSocket 消息
+const handleWebSocketMessage = (msg: any) => {
+  switch (msg.type) {
+    case 'auth':
+      if (msg.ok) {
+        console.log('[WS] Authenticated')
+        // 订阅所有群组
+        groups.value.forEach(g => {
+          ws.value?.send(JSON.stringify({
+            type: 'group_subscribe',
+            group_id: g.id
+          }))
+        })
+      }
+      break
+    case 'group_message':
+      if (selectedGroup.value?.id === msg.group_id) {
+        groupMessages.value.push({
+          id: msg.timestamp,
+          username: msg.from,
+          content: msg.content
+        })
+      }
+      break
+    case 'group_subscribed':
+      console.log('[WS] Subscribed to group', msg.group_id)
+      break
+  }
+}
 
 // 登录
 const handleLogin = async () => {
@@ -246,6 +314,7 @@ const handleLogin = async () => {
     localStorage.setItem('token', data.access_token)
     localStorage.setItem('user', JSON.stringify({ id: data.user_id, username: data.username }))
     
+    connectWebSocket()
     loadGroups()
   } catch (e: any) {
     error.value = e.message
@@ -296,7 +365,12 @@ const loadGroups = async () => {
 // 选择群组
 const selectGroup = (group: any) => {
   selectedGroup.value = group
-  // TODO: 加载群消息
+  // 订阅群组
+  ws.value?.send(JSON.stringify({
+    type: 'group_subscribe',
+    group_id: group.id
+  }))
+  // TODO: 加载历史消息
 }
 
 // 创建群组
@@ -323,8 +397,21 @@ const createGroup = async () => {
 
 // 发送消息
 const sendMessage = () => {
-  if (!newMessage.value.trim()) return
-  // TODO: 发送到 WebSocket
+  if (!newMessage.value.trim() || !selectedGroup.value) return
+  
+  ws.value?.send(JSON.stringify({
+    type: 'group_message',
+    group_id: selectedGroup.value.id,
+    content: newMessage.value
+  }))
+  
+  // 添加到本地消息列表
+  groupMessages.value.push({
+    id: Date.now(),
+    username: currentUser.value.username,
+    content: newMessage.value
+  })
+  
   newMessage.value = ''
 }
 
@@ -335,7 +422,13 @@ onMounted(() => {
   if (savedUser && savedToken) {
     currentUser.value = JSON.parse(savedUser)
     token.value = savedToken
+    connectWebSocket()
     loadGroups()
   }
+})
+
+// 清理
+onUnmounted(() => {
+  if (ws.value) ws.value.close()
 })
 </script>
